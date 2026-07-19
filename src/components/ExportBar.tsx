@@ -82,20 +82,29 @@ export function ExportBar({
   const generateFrames = () => {
     if (!selectedGauge) return;
     const opts = resolveDrawOptions(selectedGauge, themes);
-    const isSolid = opts.nSegs === 0;
-    const frameCount = opts.mode === 'container' ? 0 : (isSolid ? 10 : opts.nSegs);
+    // Containers have no percentage value, so they're a single static image.
+    // Everything else gets 21 frames at 5%-of-value steps (0,5,...,100),
+    // independent of the gauge's own segment count, so InfoPanel-style
+    // consumers can update the displayed image every 5% of live sensor
+    // value rather than only at whatever coarser step the gauge's visual
+    // segment count would otherwise imply.
+    const onCounts = opts.mode === 'container'
+      ? [0]
+      : Array.from({ length: 21 }, (_, i) => {
+        const pct = i * 5;
+        return opts.nSegs === 0 ? pct : Math.round((pct / 100) * opts.nSegs);
+      });
     const stamp = `${baseName}-${selectedGauge.width}x${selectedGauge.height}-${makeStamp()}`;
     const next: FrameData[] = [];
-    for (let f = 0; f <= frameCount; f++) {
-      const onCount = opts.mode === 'container' ? 0 : (isSolid ? f * 10 : f);
+    for (let f = 0; f < onCounts.length; f++) {
       const canvas = document.createElement('canvas');
       canvas.width = selectedGauge.width;
       canvas.height = selectedGauge.height;
-      drawOn(canvas, onCount, opts);
+      drawOn(canvas, onCounts[f], opts);
       next.push({ dataUrl: canvas.toDataURL('image/png'), label: `${stamp}-${f}` });
     }
     setFrames(next);
-    setStatus(`${frameCount + 1} frame${frameCount === 0 ? '' : 's'} generated at ${selectedGauge.width}×${selectedGauge.height}px.`);
+    setStatus(`${onCounts.length} frame${onCounts.length === 1 ? '' : 's'} generated at ${selectedGauge.width}×${selectedGauge.height}px.`);
   };
 
   const downloadZip = async () => {

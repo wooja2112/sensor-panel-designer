@@ -21,10 +21,22 @@
 // Unlike AIDA64's bespoke, undocumented text format, XmlSerializer's output
 // shape (root "ArrayOf<Type>", xsi:type only where the runtime type differs
 // from the declared type, omitted elements falling back to each class's
-// compiled default) is standard, documented .NET behaviour — it doesn't need
-// the same byte-for-byte sample it took to pin down AIDA64's format. That
-// said, there was no live InfoPanel install available to actually round-trip
-// this through — treat it as verified against source, not proven by import.
+// compiled default) is standard, documented .NET behaviour.
+//
+// One thing NOT standard/documented: asset paths inside the zip must use a
+// literal BACKSLASH ("assets\name.png"), not "/". This was found by diffing
+// a real, working .infopanel export against ours and cross-checking the
+// exact source tag (v1.3.1, github.com/habibrehmansg/infopanel) the reporter
+// had installed: ImportProfile there does
+// `entry.FullName.StartsWith("assets\\")` with no forward-slash fallback (a
+// later branch added `|| StartsWith("assets/")`, but v1.3.1 doesn't have
+// it), and InfoPanel's own ExportProfile produces backslash paths because it
+// builds entry names with Path.Combine("assets", name) on Windows. A
+// forward-slash zip parses fine and even round-trips DisplayItems.xml
+// correctly, but the asset-collecting loop silently matches nothing, so the
+// per-profile assets/{guid}/ folder never gets created and every image
+// (background included) fails to load with "Image path is invalid or file
+// does not exist" — confirmed against the reporter's own InfoPanel log.
 //
 // InfoPanel has no fixed, cross-machine sensor mnemonic like AIDA64's
 // SCPUUTI — its HWiNFO/LibreHardwareMonitor sensor IDs are hashes/paths
@@ -65,15 +77,19 @@ function renderGauge(gauge: GaugeInstance, themes: ThemesMap, onCount: number): 
   return canvas;
 }
 
+// Always 21 frames at 5%-of-sensor-value steps (0,5,...,100), independent of
+// the gauge's own segment count, so InfoPanel's image-index selection
+// updates every 5% of live sensor value rather than only at whatever
+// coarser step the gauge's visual segment count would otherwise imply.
 // Same stepping as this app's own "Generate frame set" button (ExportBar.tsx)
 // so a gauge exported to InfoPanel animates through identical frames to what
 // you'd get downloading them individually.
 function frameOnCounts(gauge: GaugeInstance): number[] {
   const opts = gauge.opts;
-  const isSolid = opts.nSegs === 0;
-  const frameCount = isSolid ? 10 : opts.nSegs;
   const counts: number[] = [];
-  for (let f = 0; f <= frameCount; f++) counts.push(isSolid ? f * 10 : f);
+  for (let pct = 0; pct <= 100; pct += 5) {
+    counts.push(opts.nSegs === 0 ? pct : Math.round((pct / 100) * opts.nSegs));
+  }
   return counts;
 }
 
@@ -186,7 +202,14 @@ export async function downloadInfoPanelBundle(
   const zip = new JSZip();
   zip.file('Profile.xml', profileXml);
   zip.file('DisplayItems.xml', displayItemsXml);
-  for (const f of files) zip.file(`assets/${f.name}`, f.blob);
+  // Backslash, not forward slash — see the file-level comment above; this is
+  // the one thing InfoPanel's own ImportProfile (at least as of v1.3.1)
+  // requires that isn't standard zip convention. createFolders:false also
+  // still matters: JSZip auto-creates a real "assets\" directory entry
+  // otherwise, and InfoPanel's ImportProfile would try to ExtractToFile that
+  // placeholder as if it were a real asset, throwing and aborting the loop
+  // before any real asset gets written to disk.
+  for (const f of files) zip.file(`assets\\${f.name}`, f.blob, { createFolders: false });
 
   // Same reasoning as the AIDA64 exporter: PNGs are already compressed, so
   // DEFLATE-recompressing them in pure JS wastes time for no size benefit.
