@@ -1,10 +1,10 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { GaugeInstance, PanelConfig } from './types';
 import { createGaugeInstance, defaultPanelConfig } from './types';
 import type { BackgroundOptions } from './lib/backgroundRender';
 import type { DrawOptions, GaugeMode, ThemesMap } from './lib/gaugeRender';
 import { DEFAULT_THEMES } from './lib/gaugeRender';
-import { downloadPanelFile, parsePanelFile } from './lib/file';
+import { clearAutosave, downloadPanelFile, loadAutosave, parsePanelFile, saveAutosave } from './lib/file';
 import { timestamp } from './lib/compose';
 import { BackgroundPanel } from './components/BackgroundPanel';
 import { GaugePanel } from './components/GaugePanel';
@@ -14,14 +14,38 @@ import { ExportBar } from './components/ExportBar';
 import { ThemeDesigner } from './components/ThemeDesigner';
 
 export default function App() {
-  const [panel, setPanel] = useState<PanelConfig>(() => defaultPanelConfig());
-  const [gauges, setGauges] = useState<GaugeInstance[]>([]);
-  const [themes, setThemes] = useState<ThemesMap>(() => structuredClone(DEFAULT_THEMES));
+  // Loaded exactly once, synchronously, before the first render's state
+  // initializers run — a ref (not a fourth useState) so it doesn't need its
+  // own setter or trigger a re-render.
+  const autosaveRef = useRef<ReturnType<typeof loadAutosave> | undefined>(undefined);
+  if (autosaveRef.current === undefined) autosaveRef.current = loadAutosave();
+  const autosave = autosaveRef.current;
+
+  const [panel, setPanel] = useState<PanelConfig>(() => autosave?.panel ?? defaultPanelConfig());
+  const [gauges, setGauges] = useState<GaugeInstance[]>(() => autosave?.gauges ?? []);
+  const [themes, setThemes] = useState<ThemesMap>(() => autosave?.themes ?? structuredClone(DEFAULT_THEMES));
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showDesigner, setShowDesigner] = useState(false);
+  const [restoredBannerDismissed, setRestoredBannerDismissed] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const selectedGauge = useMemo(() => gauges.find(g => g.id === selectedId) ?? null, [gauges, selectedId]);
+
+  // Debounced so a drag/resize (many state updates per second) doesn't hit
+  // localStorage — a synchronous API — on every single pointermove.
+  useEffect(() => {
+    const t = setTimeout(() => saveAutosave(panel, gauges, themes), 400);
+    return () => clearTimeout(t);
+  }, [panel, gauges, themes]);
+
+  const startFresh = useCallback(() => {
+    clearAutosave();
+    setPanel(defaultPanelConfig());
+    setGauges([]);
+    setThemes(structuredClone(DEFAULT_THEMES));
+    setSelectedId(null);
+    setRestoredBannerDismissed(true);
+  }, []);
 
   const handleSave = useCallback(() => {
     downloadPanelFile(panel, gauges, themes, `panel-${timestamp()}.sensorpaneldesign`);
@@ -41,6 +65,7 @@ export default function App() {
         setGauges(data.gauges);
         setThemes(data.themes);
         setSelectedId(null);
+        setRestoredBannerDismissed(true);
       } catch (err) {
         window.alert(err instanceof Error ? err.message : 'Failed to open file.');
       }
@@ -117,6 +142,14 @@ export default function App() {
       <div className="flex items-baseline gap-3">
         <h1 className="text-base font-medium tracking-tight text-foreground">Sensor Panel Designer</h1>
         <span className="text-[11px] text-muted-foreground">background + gauge compositor</span>
+        {autosave && !restoredBannerDismissed && (
+          <span className="text-[11px] text-muted-foreground">
+            · restored your last session —{' '}
+            <button type="button" onClick={startFresh} className="underline hover:text-foreground cursor-pointer">start fresh</button>
+            {' '}·{' '}
+            <button type="button" onClick={() => setRestoredBannerDismissed(true)} className="underline hover:text-foreground cursor-pointer">dismiss</button>
+          </span>
+        )}
         <div className="ml-auto flex gap-2">
           <input ref={fileInputRef} type="file" accept=".sensorpaneldesign,application/json"
             className="hidden" onChange={handleFileSelected} />
@@ -168,6 +201,7 @@ export default function App() {
           {selectedGauge ? (
             <GaugePanel
               gauge={selectedGauge}
+              panel={panel}
               themes={themes}
               onChange={patch => updateGaugeOpts(selectedGauge.id, patch)}
               onMeta={patch => updateGaugeMeta(selectedGauge.id, patch)}

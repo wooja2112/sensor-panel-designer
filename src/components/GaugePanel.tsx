@@ -1,7 +1,7 @@
 // Controls for the currently-selected gauge instance, ported from Sensor
 // Gauge Image Creator's App.tsx control panel (originally one big global
 // useState block) — reshaped to operate on a single GaugeInstance via props.
-import type { GaugeInstance } from '../types';
+import type { GaugeInstance, PanelConfig } from '../types';
 import type { DrawOptions, GaugeMode, ColorMode, LabelPos, ContainerShape, ContainerCorner, ThemesMap } from '../lib/gaugeRender';
 import { defaultSizeForMode } from '../lib/gaugeRender';
 import { CtrlRow, Pill, ColorField, SliderRow } from './ui-primitives';
@@ -21,9 +21,10 @@ const numberInputClass = 'bg-background border border-border rounded px-2 py-1 t
 const textInputClass = 'flex-1 bg-background border border-border rounded px-2 py-1 text-[11px] text-foreground w-full focus:outline-none focus:border-primary/60';
 
 export function GaugePanel({
-  gauge, themes, onChange, onMeta, onOpenThemeDesigner, onDelete, onDuplicate,
+  gauge, panel, themes, onChange, onMeta, onOpenThemeDesigner, onDelete, onDuplicate,
 }: {
   gauge: GaugeInstance;
+  panel: PanelConfig;
   themes: ThemesMap;
   onChange: (patch: Partial<DrawOptions>) => void;
   onMeta: (patch: Partial<Pick<GaugeInstance, 'name' | 'x' | 'y' | 'width' | 'height' | 'previewValue' | 'themeKey' | 'aidaSensorId'>>) => void;
@@ -33,6 +34,13 @@ export function GaugePanel({
 }) {
   const opts = gauge.opts;
   const mode = opts.mode;
+
+  // Centers the gauge's own X/Y-plus-half-size midpoint on the panel — the
+  // same midpoint compose.ts and CanvasWorkspace already treat as "the
+  // gauge's center" for a rotated bar gauge's swapped on-screen box, so this
+  // stays correct regardless of rotation without any special-casing here.
+  const centerHorizontally = () => onMeta({ x: Math.round((panel.width - gauge.width) / 2) });
+  const centerVertically = () => onMeta({ y: Math.round((panel.height - gauge.height) / 2) });
 
   const switchMode = (m: GaugeMode) => {
     const size = defaultSizeForMode(m);
@@ -60,6 +68,19 @@ export function GaugePanel({
         <div className="grid grid-cols-2 gap-2">
           <input type="number" value={gauge.x} onChange={e => onMeta({ x: Math.round(+e.target.value || 0) })} className={numberInputClass} />
           <input type="number" value={gauge.y} onChange={e => onMeta({ y: Math.round(+e.target.value || 0) })} className={numberInputClass} />
+        </div>
+      </CtrlRow>
+
+      <CtrlRow label="Align on panel">
+        <div className="flex gap-2">
+          <button type="button" onClick={centerHorizontally}
+            className="flex-1 px-2 py-1.5 text-[10px] border border-border rounded hover:bg-secondary transition-colors cursor-pointer text-foreground"
+            title="Center horizontally on the panel"
+          >Center H</button>
+          <button type="button" onClick={centerVertically}
+            className="flex-1 px-2 py-1.5 text-[10px] border border-border rounded hover:bg-secondary transition-colors cursor-pointer text-foreground"
+            title="Center vertically on the panel"
+          >Center V</button>
         </div>
       </CtrlRow>
 

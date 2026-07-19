@@ -52,3 +52,37 @@ export function downloadPanelFile(panel: PanelConfig, gauges: GaugeInstance[], t
   link.click();
   URL.revokeObjectURL(url);
 }
+
+// Auto-persists the whole design to localStorage (same shape/version as the
+// downloadable .sensorpaneldesign file) so a browser refresh doesn't lose
+// work. Versioned via the same SENSOR_PANEL_FILE_VERSION check as the file
+// format, so a future schema change just makes old autosaves get ignored
+// (parsePanelFile throws, caught below) rather than crash the app on load.
+const AUTOSAVE_KEY = 'sensorPanelDesigner.autosave.v1';
+
+export function saveAutosave(panel: PanelConfig, gauges: GaugeInstance[], themes: ThemesMap) {
+  try {
+    localStorage.setItem(AUTOSAVE_KEY, serializePanelFile(panel, gauges, themes));
+  } catch {
+    // Storage full, disabled, or unavailable (e.g. private browsing) —
+    // autosave is a convenience, not a requirement, so fail silently.
+  }
+}
+
+export function loadAutosave(): SensorPanelFile | null {
+  try {
+    const raw = localStorage.getItem(AUTOSAVE_KEY);
+    if (!raw) return null;
+    return parsePanelFile(raw);
+  } catch {
+    return null;
+  }
+}
+
+export function clearAutosave() {
+  try {
+    localStorage.removeItem(AUTOSAVE_KEY);
+  } catch {
+    // ignore
+  }
+}
