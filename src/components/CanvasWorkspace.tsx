@@ -23,6 +23,26 @@ interface ResizeState {
   startClientY: number;
   startWidth: number;
   startHeight: number;
+  // True when this gauge's on-screen box has width/height swapped relative
+  // to gauge.width/gauge.height (a 90°/270°-rotated bar gauge) — see
+  // boxSize() below. Screen-space drag deltas then need swapping back too,
+  // since screen-horizontal drag is growing/shrinking gauge.height in that
+  // case, not gauge.width.
+  swapped: boolean;
+}
+
+// A bar gauge rotated 90°/270° renders into a canvas with width/height
+// swapped (gaugeRender.ts resizes it to fit without clipping) and
+// compose.ts centers that on the gauge's original center — so the on-screen
+// box occupies gauge.height × gauge.width instead of gauge.width × gauge.height,
+// still centered at the same point. Every other case (0°/180°, or any
+// non-bar mode, which never resizes its canvas) keeps the plain box. Mirrors
+// the `mode === "bar" && (rotation === 90 || rotation === 270)` check in
+// gaugeRender.ts's drawOn — kept in sync with it, not derived from it,
+// since the two live in different modules.
+function boxSize(g: GaugeInstance): { width: number; height: number; swapped: boolean } {
+  const swapped = g.opts.mode === 'bar' && (g.opts.rotation === 90 || g.opts.rotation === 270);
+  return swapped ? { width: g.height, height: g.width, swapped } : { width: g.width, height: g.height, swapped };
 }
 
 export function CanvasWorkspace({
@@ -83,10 +103,14 @@ export function CanvasWorkspace({
       if (resize && e.pointerId === resize.pointerId) {
         const dx = (e.clientX - resize.startClientX) / scaleRef.current;
         const dy = (e.clientY - resize.startClientY) / scaleRef.current;
+        // Swapped box: screen-horizontal drag is the on-screen box's height
+        // axis, which is gauge.width — so dx/dy feed width/height swapped too.
+        const dWidth = resize.swapped ? dy : dx;
+        const dHeight = resize.swapped ? dx : dy;
         onResizeGauge(
           resize.id,
-          Math.max(MIN_GAUGE_SIZE, Math.round(resize.startWidth + dx)),
-          Math.max(MIN_GAUGE_SIZE, Math.round(resize.startHeight + dy)),
+          Math.max(MIN_GAUGE_SIZE, Math.round(resize.startWidth + dWidth)),
+          Math.max(MIN_GAUGE_SIZE, Math.round(resize.startHeight + dHeight)),
         );
       }
     }
@@ -139,6 +163,16 @@ export function CanvasWorkspace({
           />
           {gauges.map(g => {
             const isSelected = g.id === selectedId;
+            // 0°/90°/180°/270° are the only rotations offered, so the
+            // on-screen box is always axis-aligned — for 90°/270° bar
+            // gauges it's just the width/height-swapped box centered on the
+            // same point as the un-rotated one (see boxSize above), no CSS
+            // transform needed to place the hitbox, border, or resize handle.
+            const box = boxSize(g);
+            const centerX = g.x + g.width / 2;
+            const centerY = g.y + g.height / 2;
+            const boxLeft = centerX - box.width / 2;
+            const boxTop = centerY - box.height / 2;
             return (
               <div
                 key={g.id}
@@ -155,26 +189,15 @@ export function CanvasWorkspace({
                     startY: g.y,
                   };
                 }}
-                className={isSelected ? 'absolute cursor-move' : 'absolute cursor-move border border-transparent hover:border-primary/50'}
+                className={isSelected ? 'absolute cursor-move border-2 border-primary' : 'absolute cursor-move border border-transparent hover:border-primary/50'}
                 style={{
-                  left: g.x * scale,
-                  top: g.y * scale,
-                  width: g.width * scale,
-                  height: g.height * scale,
+                  left: boxLeft * scale,
+                  top: boxTop * scale,
+                  width: box.width * scale,
+                  height: box.height * scale,
                 }}
                 title={g.name}
               >
-                {isSelected && (
-                  // Rotated separately from the drag hitbox above: the hitbox and
-                  // resize handle below stay axis-aligned (resize math assumes
-                  // un-rotated width/height deltas), but the visible outline should
-                  // track the gauge's own rotation so it still frames the rotated
-                  // artwork instead of the un-rotated bounding box.
-                  <div
-                    className="absolute inset-0 border-2 border-primary pointer-events-none"
-                    style={{ transform: `rotate(${g.opts.rotation}deg)` }}
-                  />
-                )}
                 {isSelected && (
                   <div
                     onPointerDown={e => {
@@ -187,6 +210,7 @@ export function CanvasWorkspace({
                         startClientY: e.clientY,
                         startWidth: g.width,
                         startHeight: g.height,
+                        swapped: box.swapped,
                       };
                     }}
                     className="absolute -right-1.5 -bottom-1.5 w-3 h-3 rounded-sm bg-primary border border-background cursor-nwse-resize"
