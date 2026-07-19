@@ -411,13 +411,23 @@ function drawContainerGauge(ctx: CanvasRenderingContext2D, W: number, H: number,
 
 export function drawOn(canvas: HTMLCanvasElement, onCount: number, opts: DrawOptions) {
   const { mode, nSegs, sw, gap, bgColor, showLabel, labelPos, arcSpan, trackColor } = opts;
+  // A bar gauge's footprint is naturally elongated along one axis. Rotating
+  // it 90°/270° in place (same canvas pixel size) would clip the long axis
+  // against the short canvas dimension, so the canvas itself is resized to
+  // fit the rotated footprint. W/H below stay the *un-rotated* logical size
+  // the caller configured (canvas.width/height are read before any resize),
+  // so all the layout math further down — written in terms of W/H — is
+  // unaffected; only the rotation transform's pivot and the fill/clear
+  // extents need to know about the swapped physical canvas size.
   const W = canvas.width, H = canvas.height;
+  const rotated90 = mode === "bar" && (opts.rotation === 90 || opts.rotation === 270);
+  if (rotated90) { canvas.width = H; canvas.height = W; }
   const ctx = canvas.getContext("2d")!;
-  ctx.clearRect(0, 0, W, H);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
 
   if (bgColor !== "transparent") {
     ctx.fillStyle = bgColor;
-    ctx.fillRect(0, 0, W, H);
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
   }
 
   if (mode === "container") {
@@ -434,10 +444,12 @@ export function drawOn(canvas: HTMLCanvasElement, onCount: number, opts: DrawOpt
   const pctOf = (oc: number, total: number) => isSolid ? oc : Math.round((oc / total) * 100);
 
   if (mode === "bar") {
-    // Apply rotation around canvas center
+    // Rotate around the actual (possibly swapped-for-90°/270°) canvas
+    // center, then shift by the logical W/H center so the unrotated layout
+    // below still lands correctly inside the rotated canvas.
     if (opts.rotation !== 0) {
       ctx.save();
-      ctx.translate(W / 2, H / 2);
+      ctx.translate(canvas.width / 2, canvas.height / 2);
       ctx.rotate(opts.rotation * Math.PI / 180);
       ctx.translate(-W / 2, -H / 2);
     }

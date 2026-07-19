@@ -18,8 +18,15 @@ export function renderPanel(canvas: HTMLCanvasElement, panel: PanelConfig, gauge
     off.height = Math.max(1, Math.round(gauge.height));
     const opts = resolveDrawOptions(gauge, themes);
     const onCount = previewValueToOnCount(gauge.previewValue, opts.nSegs);
+    // drawOn may resize `off` (swapping width/height) for a 90°/270°-rotated
+    // bar gauge, so it's centered at the gauge's original center rather than
+    // placed by top-left corner — that keeps it aligned with the selection
+    // outline, which rotates in place around that same center (CSS
+    // transform default origin) in CanvasWorkspace.
     drawOn(off, onCount, opts);
-    ctx.drawImage(off, gauge.x, gauge.y);
+    const centerX = gauge.x + gauge.width / 2;
+    const centerY = gauge.y + gauge.height / 2;
+    ctx.drawImage(off, centerX - off.width / 2, centerY - off.height / 2);
   }
 }
 

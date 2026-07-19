@@ -75,8 +75,10 @@ export function ExportBar({
     canvas.width = selectedGauge.width;
     canvas.height = selectedGauge.height;
     const onCount = opts.nSegs === 0 ? selectedGauge.previewValue : Math.round((selectedGauge.previewValue / 100) * opts.nSegs);
+    // drawOn may resize the canvas (swapping width/height) for a
+    // 90°/270°-rotated bar gauge, so the filename reflects its actual size.
     drawOn(canvas, onCount, opts);
-    downloadCanvasPng(canvas, `${baseName}-${selectedGauge.width}x${selectedGauge.height}-${timestamp()}.png`);
+    downloadCanvasPng(canvas, `${baseName}-${canvas.width}x${canvas.height}-${timestamp()}.png`);
   };
 
   const generateFrames = () => {
@@ -94,17 +96,28 @@ export function ExportBar({
         const pct = i * 5;
         return opts.nSegs === 0 ? pct : Math.round((pct / 100) * opts.nSegs);
       });
-    const stamp = `${baseName}-${selectedGauge.width}x${selectedGauge.height}-${makeStamp()}`;
     const next: FrameData[] = [];
+    // drawOn may resize the canvas (swapping width/height) for a
+    // 90°/270°-rotated bar gauge; capture the actual size from the first
+    // frame (all frames of a gauge share the same size) for the filename
+    // stamp and status text.
+    let stamp = '';
+    let renderedWidth = selectedGauge.width;
+    let renderedHeight = selectedGauge.height;
     for (let f = 0; f < onCounts.length; f++) {
       const canvas = document.createElement('canvas');
       canvas.width = selectedGauge.width;
       canvas.height = selectedGauge.height;
       drawOn(canvas, onCounts[f], opts);
+      if (f === 0) {
+        renderedWidth = canvas.width;
+        renderedHeight = canvas.height;
+        stamp = `${baseName}-${renderedWidth}x${renderedHeight}-${makeStamp()}`;
+      }
       next.push({ dataUrl: canvas.toDataURL('image/png'), label: `${stamp}-${f}` });
     }
     setFrames(next);
-    setStatus(`${onCounts.length} frame${onCounts.length === 1 ? '' : 's'} generated at ${selectedGauge.width}×${selectedGauge.height}px.`);
+    setStatus(`${onCounts.length} frame${onCounts.length === 1 ? '' : 's'} generated at ${renderedWidth}×${renderedHeight}px.`);
   };
 
   const downloadZip = async () => {

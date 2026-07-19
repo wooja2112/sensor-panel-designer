@@ -155,9 +155,17 @@ async function buildBundleParts(panel: PanelConfig, gauges: GaugeInstance[], the
 
     const onCounts = frameOnCounts(gauge);
     const imageItems: string[] = [];
+    // drawOn may resize the canvas (swapping width/height) for a
+    // 90°/270°-rotated bar gauge; all frames of a gauge share the same
+    // size, so any one canvas's dimensions after rendering are
+    // representative.
+    let renderedWidth = Math.round(gauge.width);
+    let renderedHeight = Math.round(gauge.height);
     for (let i = 0; i < onCounts.length; i++) {
       onProgress?.(`Rendering "${gauge.name}" (${gaugeIndex}/${gauges.length}) — frame ${i + 1}/${onCounts.length}…`);
       const canvas = renderGauge(gauge, themes, onCounts[i]);
+      renderedWidth = canvas.width;
+      renderedHeight = canvas.height;
       const name = uniqueName(`${slug}-${String(i).padStart(2, '0')}.png`);
       files.push({ name, blob: await canvasToPngBlob(canvas) });
       imageItems.push(
@@ -166,11 +174,17 @@ async function buildBundleParts(panel: PanelConfig, gauges: GaugeInstance[], the
       );
     }
 
+    // Declared Width/Height use the *actual* rendered pixel size (not
+    // gauge.width/height) so InfoPanel doesn't stretch an already-rotated
+    // PNG back into the wrong, un-rotated box; X/Y are centered on the
+    // gauge's original bounding box to match compose.ts's placement.
+    const itemX = Math.round(gauge.x + gauge.width / 2 - renderedWidth / 2);
+    const itemY = Math.round(gauge.y + gauge.height / 2 - renderedHeight / 2);
     items.push(
       `<DisplayItem xsi:type="GaugeDisplayItem"><Name>${safeName}</Name>` +
-      `<X>${Math.round(gauge.x)}</X><Y>${Math.round(gauge.y)}</Y>` +
+      `<X>${itemX}</X><Y>${itemY}</Y>` +
       `<MinValue>0</MinValue><MaxValue>100</MaxValue>` +
-      `<Width>${Math.round(gauge.width)}</Width><Height>${Math.round(gauge.height)}</Height>` +
+      `<Width>${renderedWidth}</Width><Height>${renderedHeight}</Height>` +
       `<Images>${imageItems.join('')}</Images></DisplayItem>`,
     );
   }

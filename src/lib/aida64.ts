@@ -130,23 +130,38 @@ async function buildBundleParts(panel: PanelConfig, gauges: GaugeInstance[], the
     }
 
     const stateNames: string[] = [];
+    // drawOn may resize the canvas (swapping width/height) for a
+    // 90°/270°-rotated bar gauge, so RESIZW/RESIZH/ITMX/ITMY below use the
+    // *actual* rendered pixel size rather than gauge.width/height — otherwise
+    // AIDA64 would stretch the correctly-rotated PNG back into the wrong,
+    // un-rotated box. All 16 states share the same size, so any one canvas's
+    // dimensions after rendering are representative.
+    let renderedWidth = Math.round(gauge.width);
+    let renderedHeight = Math.round(gauge.height);
     for (let state = 0; state < AIDA_STATE_COUNT; state++) {
       onProgress?.(`Rendering "${gauge.name}" (${gaugeIndex}/${gauges.length}) — state ${state + 1}/${AIDA_STATE_COUNT}…`);
       const canvas = renderGauge(gauge, themes, onCountForState(gauge, state));
+      renderedWidth = canvas.width;
+      renderedHeight = canvas.height;
       const name = uniqueName(`${slug}-${String(state).padStart(2, '0')}.png`);
       files.push({ name, blob: await canvasToPngBlob(canvas) });
       stateNames.push(name);
     }
+
+    // Centered on the gauge's original (un-rotated) bounding box, matching
+    // how the app's own panel compositor places a resized render (compose.ts).
+    const itmX = Math.round(gauge.x + gauge.width / 2 - renderedWidth / 2);
+    const itmY = Math.round(gauge.y + gauge.height / 2 - renderedHeight / 2);
 
     const explicitId = sanitizeSensorId(gauge.aidaSensorId);
     if (!explicitId) defaultedGaugeNames.push(gauge.name);
     const idTag = `[GAUGE]${explicitId || DEFAULT_SENSOR_ID}`;
     items.push(
       `<ID>${idTag}</ID><LBL>${sanitizeTagText(gauge.name)}</LBL><TYP>Custom</TYP><SIZ>S</SIZ>` +
-      `<RESIZW>${Math.round(gauge.width)}</RESIZW><RESIZH>${Math.round(gauge.height)}</RESIZH>` +
+      `<RESIZW>${renderedWidth}</RESIZW><RESIZH>${renderedHeight}</RESIZH>` +
       `<MINVAL>0</MINVAL><MAXVAL>100</MAXVAL><SHWICO>0</SHWICO><SHWVAL>0</SHWVAL>` +
       `<TXTSIZ>12</TXTSIZ><FNTNAM>Segoe UI</FNTNAM><VALCOL>16777215</VALCOL><VALBI>00</VALBI>` +
-      `<ITMX>${Math.round(gauge.x)}</ITMX><ITMY>${Math.round(gauge.y)}</ITMY><STAFLS>${stateNames.join('|')}</STAFLS>`,
+      `<ITMX>${itmX}</ITMX><ITMY>${itmY}</ITMY><STAFLS>${stateNames.join('|')}</STAFLS>`,
     );
   }
 

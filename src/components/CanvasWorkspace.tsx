@@ -155,7 +155,7 @@ export function CanvasWorkspace({
                     startY: g.y,
                   };
                 }}
-                className={isSelected ? 'absolute cursor-move border-2 border-primary' : 'absolute cursor-move border border-transparent hover:border-primary/50'}
+                className={isSelected ? 'absolute cursor-move' : 'absolute cursor-move border border-transparent hover:border-primary/50'}
                 style={{
                   left: g.x * scale,
                   top: g.y * scale,
@@ -164,6 +164,17 @@ export function CanvasWorkspace({
                 }}
                 title={g.name}
               >
+                {isSelected && (
+                  // Rotated separately from the drag hitbox above: the hitbox and
+                  // resize handle below stay axis-aligned (resize math assumes
+                  // un-rotated width/height deltas), but the visible outline should
+                  // track the gauge's own rotation so it still frames the rotated
+                  // artwork instead of the un-rotated bounding box.
+                  <div
+                    className="absolute inset-0 border-2 border-primary pointer-events-none"
+                    style={{ transform: `rotate(${g.opts.rotation}deg)` }}
+                  />
+                )}
                 {isSelected && (
                   <div
                     onPointerDown={e => {
