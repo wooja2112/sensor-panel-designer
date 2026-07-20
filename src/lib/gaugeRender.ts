@@ -151,9 +151,12 @@ export function makeStamp() {
   return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
 }
 
+export type BarStyle = "flat" | "ascending";
+
 export interface DrawOptions {
   mode: GaugeMode;
   nSegs: number;
+  barStyle: BarStyle;
   sw: number;
   gap: number;
   gauge3D: boolean;
@@ -197,6 +200,7 @@ export function defaultDrawOptions(mode: GaugeMode = "bar"): DrawOptions {
   return {
     mode,
     nSegs: mode === "needle" ? 0 : 10,
+    barStyle: "flat",
     sw: 16,
     gap: 3,
     gauge3D: false,
@@ -471,13 +475,37 @@ export function drawOn(canvas: HTMLCanvasElement, onCount: number, opts: DrawOpt
     const barR = Math.min(4, bW * 0.015);
 
     if (isSolid) {
+      // "Ascending" on a solid (continuous) bar: same growing-height look as
+      // the segmented version, just smooth instead of blocky — a wedge/ramp
+      // whose top edge rises left-to-right, sharing the flat style's bottom
+      // edge (oy + bH) as baseline and its top-right corner (bH tall) as the
+      // wedge's tallest point.
+      const ascending = opts.barStyle === "ascending";
+      const baselineY = oy + bH;
+      const minHeightFrac = 0.15;
+      const heightAtFrac = (t: number) => bH * (minHeightFrac + t * (1 - minHeightFrac));
+      // Fill clip always uses this *full-width* shape (matching the original
+      // flat behavior) — fillRect below does the actual left-to-right
+      // reveal, so clipping against the full sloped outline naturally
+      // truncates it at the fill edge without needing a separate partial
+      // wedge path.
+      const fullShapePath = () => {
+        if (!ascending) { roundRect(ctx, ox, oy, bW, bH, barR); return; }
+        ctx.beginPath();
+        ctx.moveTo(ox, baselineY);
+        ctx.lineTo(ox + bW, baselineY);
+        ctx.lineTo(ox + bW, baselineY - heightAtFrac(1));
+        ctx.lineTo(ox, baselineY - heightAtFrac(0));
+        ctx.closePath();
+      };
+
       // Solid bar: track + clipped fill
-      roundRect(ctx, ox, oy, bW, bH, barR);
+      fullShapePath();
       ctx.fillStyle = track; ctx.fill();
       const fillW = (onCount / 100) * bW;
       if (fillW > 0) {
         ctx.save();
-        roundRect(ctx, ox, oy, bW, bH, barR); ctx.clip();
+        fullShapePath(); ctx.clip();
         // Gradient spans the full bar so the color at a given x always
         // reflects that position's value — clipping to fillW just reveals
         // the leading slice of it, giving a smooth left-to-right blend.
@@ -494,16 +522,31 @@ export function drawOn(canvas: HTMLCanvasElement, onCount: number, opts: DrawOpt
         ctx.fillRect(ox, oy, fillW, bH);
         ctx.restore();
       }
-      if (opts.gauge3D) apply3DBarShading(ctx, ox, oy, bW, bH, barR, opts.lightAngle);
+      // Skipped for the wedge shape: apply3DBarShading clips to a plain
+      // rounded rect internally, which would shade outside the wedge's
+      // triangular silhouette (e.g. the empty corner above its short end).
+      if (opts.gauge3D && !ascending) apply3DBarShading(ctx, ox, oy, bW, bH, barR, opts.lightAngle);
     } else {
       const tg = Math.min(gap * (nSegs - 1), bW * 0.9), segW = (bW - tg) / nSegs;
       const segR = Math.min(4, segW / 3);
+      // "Ascending" (staircase/equalizer look): each bar grows a little
+      // taller than the last, sharing the flat style's bottom edge (oy + bH)
+      // as a common baseline, with bH — normally the flat bar's fixed
+      // thickness — acting as the tallest (rightmost) bar's height instead.
+      const ascending = opts.barStyle === "ascending";
+      const baselineY = oy + bH;
+      const minHeightFrac = 0.15;
       for (let i = 0; i < nSegs; i++) {
         const segX = ox + i * (segW + gap);
+        const segH = ascending
+          ? Math.max(2, bH * (minHeightFrac + (i / Math.max(1, nSegs - 1)) * (1 - minHeightFrac)))
+          : bH;
+        const segY = ascending ? baselineY - segH : oy;
+        const r = ascending ? Math.min(segR, segH / 3) : segR;
         ctx.fillStyle = i < onCount ? getSegFill(i, nSegs, opts) : track;
-        roundRect(ctx, segX, oy, segW, bH, segR);
+        roundRect(ctx, segX, segY, segW, segH, r);
         ctx.fill();
-        if (opts.gauge3D) apply3DBarShading(ctx, segX, oy, segW, bH, segR, opts.lightAngle);
+        if (opts.gauge3D) apply3DBarShading(ctx, segX, segY, segW, segH, r, opts.lightAngle);
       }
     }
 

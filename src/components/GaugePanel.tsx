@@ -300,6 +300,15 @@ export function GaugePanel({
         </CtrlRow>
       )}
 
+      {mode === 'bar' && (
+        <CtrlRow label="Bar style">
+          <div className="flex gap-1.5">
+            <Pill active={opts.barStyle === 'flat'} onClick={() => onChange({ barStyle: 'flat' })}>Flat</Pill>
+            <Pill active={opts.barStyle === 'ascending'} onClick={() => onChange({ barStyle: 'ascending' })}>Ascending</Pill>
+          </div>
+        </CtrlRow>
+      )}
+
       {mode !== 'needle' && mode !== 'container' && (
         <CtrlRow label={mode === 'circ' ? 'Inner ring 3D effect' : '3D effect'}>
           <div className="flex gap-1.5">
