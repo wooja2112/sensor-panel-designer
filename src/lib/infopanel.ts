@@ -51,6 +51,7 @@ import { drawOn } from './gaugeRender';
 import type { ThemesMap } from './gaugeRender';
 import type { GaugeInstance, PanelConfig } from '../types';
 import { resolveDrawOptions } from '../types';
+import { loadImage } from './imageCache';
 
 function slugify(name: string, fallback: string): string {
   const s = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
@@ -120,6 +121,13 @@ async function buildBundleParts(panel: PanelConfig, gauges: GaugeInstance[], the
   }
 
   onProgress?.('Rendering panel background…');
+  if (panel.background.image) {
+    try {
+      await loadImage(panel.background.image);
+    } catch {
+      // Export without the image rather than blocking the whole bundle.
+    }
+  }
   const bgCanvas = document.createElement('canvas');
   bgCanvas.width = Math.max(1, Math.round(panel.width));
   bgCanvas.height = Math.max(1, Math.round(panel.height));

@@ -6,6 +6,7 @@ import { drawOn, makeStamp } from '../lib/gaugeRender';
 import { renderPanel, timestamp, downloadCanvasPng } from '../lib/compose';
 import { downloadAida64Bundle } from '../lib/aida64';
 import { downloadInfoPanelBundle } from '../lib/infopanel';
+import { loadImage } from '../lib/imageCache';
 
 interface FrameData {
   dataUrl: string;
@@ -27,7 +28,14 @@ export function ExportBar({
   const [exportingAida, setExportingAida] = useState(false);
   const [exportingInfoPanel, setExportingInfoPanel] = useState(false);
 
-  const exportPanel = () => {
+  const exportPanel = async () => {
+    if (panel.background.image) {
+      try {
+        await loadImage(panel.background.image);
+      } catch {
+        // Fall through and export without the image rather than blocking export.
+      }
+    }
     const canvas = document.createElement('canvas');
     renderPanel(canvas, panel, gauges, themes);
     downloadCanvasPng(canvas, `panel-${panel.width}x${panel.height}-${timestamp()}.png`);

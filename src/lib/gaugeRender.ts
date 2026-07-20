@@ -413,6 +413,98 @@ function drawContainerGauge(ctx: CanvasRenderingContext2D, W: number, H: number,
   }
 }
 
+let _measureCtx: CanvasRenderingContext2D | null = null;
+function sharedMeasureCtx(): CanvasRenderingContext2D {
+  if (!_measureCtx) _measureCtx = document.createElement("canvas").getContext("2d")!;
+  return _measureCtx;
+}
+
+export interface GaugeLayout {
+  r: number;
+  cx: number;
+  cy: number;
+  // Half the space reserved around the ring for its own stroke width plus,
+  // when enabled, the static outer zone ring — same quantity drawOn() needs
+  // again later to place the value label outside the ring.
+  outerHalf: number;
+}
+
+// Shared radius/center computation for circ & needle gauges — identical for
+// both modes (only the content drawn inside the ring differs), so it's
+// pulled out of drawOn() rather than inlined twice. Also lets
+// computeGaugeOuterRadius() below solve backwards from a target radius to a
+// bounding box ("make same size" in App.tsx) without duplicating — and
+// risking drifting from — this math.
+export function computeGaugeLayout(W: number, H: number, opts: DrawOptions, ctx?: CanvasRenderingContext2D): GaugeLayout {
+  const { sw, showLabel, labelPos } = opts;
+  const pad = opts.labelPad;
+  const r_base = Math.min(W, H) * 0.36;
+
+  // Estimate font size using base radius so we can compute label space
+  const fs_est = Math.max(10, Math.min(r_base * 0.38, H * 0.13));
+  const measureCtx = ctx ?? sharedMeasureCtx();
+  measureCtx.font = `500 ${fs_est}px sans-serif`;
+  const lblTextW = showLabel ? measureCtx.measureText("100%").width : 0;
+
+  // Amount of canvas space the label needs in each axis
+  const lblH = fs_est + pad * 2;
+  const lblW = lblTextW + pad * 2;
+
+  // Extra radius reserved for the static outer zone ring, if enabled
+  const outerHalf = sw / 2 + (opts.outerRing ? opts.outerRingGap + opts.outerRingWidth : 0);
+
+  // Clamp r so gauge + label fit, and shift cx/cy so the whole block is centered
+  let r = r_base, cx = W / 2, cy = H / 2;
+  if (showLabel) {
+    if (labelPos === "top" || labelPos === "bottom") {
+      r = Math.min(r_base, H / 2 - outerHalf - lblH);
+      const shift = lblH / 2;
+      cy = labelPos === "top" ? H / 2 + shift : H / 2 - shift;
+    }
+    if (labelPos === "left" || labelPos === "right") {
+      r = Math.min(r_base, W / 2 - outerHalf - lblW);
+      const shift = lblW / 2;
+      cx = labelPos === "left" ? W / 2 + shift : W / 2 - shift;
+    }
+    r = Math.max(10, r);
+  }
+  // Also make sure the ring itself never clips the canvas edge
+  r = Math.max(10, Math.min(r, Math.min(W, H) / 2 - outerHalf - 1));
+
+  return { r, cx, cy, outerHalf };
+}
+
+// The outermost edge of what a circ/needle gauge actually draws — the ring
+// plus its own stroke, plus the static outer zone ring when present. Two
+// gauges with the same bounding box can still render at very different
+// visual sizes if their sw/label/outer-ring settings differ (a thick sw
+// leaves less room for the ring itself but pushes its outer edge no
+// further out — see computeGaugeLayout's final clamp), so "make gauges the
+// same size" compares *this*, not raw width/height, to decide whether two
+// ring-based gauges actually look the same size.
+export function computeGaugeOuterRadius(W: number, H: number, opts: DrawOptions, ctx?: CanvasRenderingContext2D): number {
+  const { r } = computeGaugeLayout(W, H, opts, ctx);
+  const edge = r + opts.sw / 2;
+  return opts.outerRing ? edge + opts.outerRingGap + opts.outerRingWidth : edge;
+}
+
+// Binary-searches a uniform scale factor applied to (aspectW, aspectH) so
+// the resulting box's computeGaugeOuterRadius() matches targetRadius —
+// used by "make same size" (App.tsx) to equalize how big two ring gauges
+// (circ/needle) actually *look* without touching either one's own
+// sw/arcSpan/label styling, only its bounding box. computeGaugeOuterRadius
+// is monotonically non-decreasing in box size, so this converges regardless
+// of which label/outer-ring branch ends up binding.
+export function solveRingBoxForOuterRadius(targetRadius: number, aspectW: number, aspectH: number, opts: DrawOptions): { width: number; height: number } {
+  let lo = 0.02, hi = 50;
+  for (let i = 0; i < 40; i++) {
+    const mid = (lo + hi) / 2;
+    if (computeGaugeOuterRadius(aspectW * mid, aspectH * mid, opts) < targetRadius) lo = mid; else hi = mid;
+  }
+  const s = (lo + hi) / 2;
+  return { width: Math.max(1, Math.round(aspectW * s)), height: Math.max(1, Math.round(aspectH * s)) };
+}
+
 export function drawOn(canvas: HTMLCanvasElement, onCount: number, opts: DrawOptions) {
   const { mode, nSegs, sw, gap, bgColor, showLabel, labelPos, arcSpan, trackColor } = opts;
   // A bar gauge's footprint is naturally elongated along one axis. Rotating
@@ -575,38 +667,7 @@ export function drawOn(canvas: HTMLCanvasElement, onCount: number, opts: DrawOpt
     if (opts.rotation !== 0) ctx.restore();
   } else {
     // ── circular gauge ──
-    const r_base = Math.min(W, H) * 0.36;
-
-    // Estimate font size using base radius so we can compute label space
-    const fs_est = Math.max(10, Math.min(r_base * 0.38, H * 0.13));
-    ctx.font = `500 ${fs_est}px sans-serif`;
-    const lblTextW = showLabel ? ctx.measureText("100%").width : 0;
-
-    // Amount of canvas space the label needs in each axis
-    const lblH = fs_est + pad * 2;
-    const lblW = lblTextW + pad * 2;
-
-    // Extra radius reserved for the static outer zone ring, if enabled
-    const ringGap = opts.outerRingGap;
-    const outerHalf = sw / 2 + (opts.outerRing ? ringGap + opts.outerRingWidth : 0);
-
-    // Clamp r so gauge + label fit, and shift cx/cy so the whole block is centered
-    let r = r_base, cx = W / 2, cy = H / 2;
-    if (showLabel) {
-      if (labelPos === "top" || labelPos === "bottom") {
-        r = Math.min(r_base, H / 2 - outerHalf - lblH);
-        const shift = lblH / 2;
-        cy = labelPos === "top" ? H / 2 + shift : H / 2 - shift;
-      }
-      if (labelPos === "left" || labelPos === "right") {
-        r = Math.min(r_base, W / 2 - outerHalf - lblW);
-        const shift = lblW / 2;
-        cx = labelPos === "left" ? W / 2 + shift : W / 2 - shift;
-      }
-      r = Math.max(10, r);
-    }
-    // Also make sure the ring itself never clips the canvas edge
-    r = Math.max(10, Math.min(r, Math.min(W, H) / 2 - outerHalf - 1));
+    const { r, cx, cy, outerHalf } = computeGaugeLayout(W, H, opts, ctx);
 
     const half = (180 - arcSpan) / 2, sd = 180 + half, ed = 360 + 180 - half;
     const span = ed - sd;
@@ -722,7 +783,7 @@ export function drawOn(canvas: HTMLCanvasElement, onCount: number, opts: DrawOpt
     // Static outer zone ring — always shows theme zone colors banded at the
     // 60% / 80% thresholds, regardless of the current value.
     if (!isNeedle && opts.outerRing) {
-      const ringR = r + sw / 2 + ringGap + opts.outerRingWidth / 2;
+      const ringR = r + sw / 2 + opts.outerRingGap + opts.outerRingWidth / 2;
       drawZoneRing(ctx, cx, cy, ringR, opts.outerRingWidth, sdRad, span, opts.themeColors.zone,
         opts.outerRingGlow ? opts.outerRingGlowIntensity : 0);
       if (opts.outerRing3D) apply3DRingShading(ctx, cx, cy, ringR, opts.outerRingWidth, sdRad, edRad, opts.lightAngle);

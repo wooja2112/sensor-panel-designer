@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { PanelConfig, GaugeInstance } from '../types';
 import type { ThemesMap } from '../lib/gaugeRender';
 import { renderPanel } from '../lib/compose';
+import { getCachedImage, loadImage } from '../lib/imageCache';
 
 type Zoom = number | 'fit';
 
@@ -46,13 +47,13 @@ function boxSize(g: GaugeInstance): { width: number; height: number; swapped: bo
 }
 
 export function CanvasWorkspace({
-  panel, gauges, themes, selectedId, onSelect, onMoveGauge, onResizeGauge,
+  panel, gauges, themes, selectedIds, onSelect, onMoveGauge, onResizeGauge,
 }: {
   panel: PanelConfig;
   gauges: GaugeInstance[];
   themes: ThemesMap;
-  selectedId: string | null;
-  onSelect: (id: string | null) => void;
+  selectedIds: string[];
+  onSelect: (id: string | null, additive?: boolean) => void;
   onMoveGauge: (id: string, x: number, y: number) => void;
   onResizeGauge: (id: string, width: number, height: number) => void;
 }) {
@@ -88,6 +89,18 @@ export function CanvasWorkspace({
     const canvas = canvasRef.current;
     if (!canvas) return;
     renderPanel(canvas, panel, gauges, themes);
+
+    // The background image may have arrived via autosave/project load,
+    // where it isn't decoded yet on this first paint — renderBackground
+    // silently skips it in that case, so re-render once decoding finishes.
+    const src = panel.background.image;
+    if (src && !getCachedImage(src)) {
+      let cancelled = false;
+      loadImage(src).then(() => {
+        if (!cancelled) renderPanel(canvas, panel, gauges, themes);
+      }).catch(() => {});
+      return () => { cancelled = true; };
+    }
   }, [panel, gauges, themes]);
 
   useEffect(() => {
@@ -162,7 +175,11 @@ export function CanvasWorkspace({
             onPointerDown={() => onSelect(null)}
           />
           {gauges.map(g => {
-            const isSelected = g.id === selectedId;
+            const isSelected = selectedIds.includes(g.id);
+            // The first id in selectedIds is the anchor for multi-select
+            // actions like "make same size" — given a distinct (solid vs.
+            // dashed) border so it's clear which gauge is the reference.
+            const isPrimary = selectedIds[0] === g.id;
             // 0°/90°/180°/270° are the only rotations offered, so the
             // on-screen box is always axis-aligned — for 90°/270° bar
             // gauges it's just the width/height-swapped box centered on the
@@ -178,7 +195,11 @@ export function CanvasWorkspace({
                 key={g.id}
                 onPointerDown={e => {
                   e.stopPropagation();
-                  onSelect(g.id);
+                  const additive = e.shiftKey || e.ctrlKey || e.metaKey;
+                  onSelect(g.id, additive);
+                  // Shift/ctrl-click only toggles selection membership — it
+                  // shouldn't also start dragging the gauge under the cursor.
+                  if (additive) return;
                   (e.target as HTMLElement).setPointerCapture(e.pointerId);
                   dragRef.current = {
                     id: g.id,
@@ -189,7 +210,10 @@ export function CanvasWorkspace({
                     startY: g.y,
                   };
                 }}
-                className={isSelected ? 'absolute cursor-move border-2 border-primary' : 'absolute cursor-move border border-transparent hover:border-primary/50'}
+                className={[
+                  'absolute cursor-move border-2',
+                  isPrimary ? 'border-primary' : isSelected ? 'border-primary/60 border-dashed' : 'border-transparent hover:border-primary/50',
+                ].join(' ')}
                 style={{
                   left: boxLeft * scale,
                   top: boxTop * scale,
@@ -198,7 +222,7 @@ export function CanvasWorkspace({
                 }}
                 title={g.name}
               >
-                {isSelected && (
+                {isSelected && selectedIds.length === 1 && (
                   <div
                     onPointerDown={e => {
                       e.stopPropagation();

@@ -1,8 +1,15 @@
 // Ported from PanelBackgroundBuilder's src/App.jsx. Pure canvas drawing
 // functions — no React dependency — so the same code path renders both the
 // live preview and the full-resolution export.
+import { getCachedImage } from './imageCache';
 
 export type BackgroundShape = 'none' | 'circle' | 'polygon';
+
+// 'cover' scales (preserving aspect ratio) to fill the panel, cropping
+// whatever overflows. 'actual' draws at native pixel size, centered — an
+// oversized image is cropped for free since drawImage never paints outside
+// the canvas's own bounds.
+export type BackgroundImageFit = 'cover' | 'actual';
 
 export type PatternKey =
   | 'none'
@@ -32,6 +39,8 @@ export interface BackgroundOptions {
   backgroundGradientEnabled: boolean;
   colorEnd: string;
   backgroundGradientAngle: number;
+  image: string | null;
+  imageFit: BackgroundImageFit;
   pattern: PatternKey;
   patternColor: string;
   density: number;
@@ -80,6 +89,8 @@ export function defaultBackgroundOptions(): BackgroundOptions {
     backgroundGradientEnabled: false,
     colorEnd: '#ffffff',
     backgroundGradientAngle: 0,
+    image: null,
+    imageFit: 'cover',
     pattern: 'none',
     patternColor: '#ffffff',
     density: 5,
@@ -644,6 +655,22 @@ function drawBorder(
   ctx.restore();
 }
 
+function drawBackgroundImage(ctx: CanvasRenderingContext2D, canvasWidth: number, canvasHeight: number, image: string, fit: BackgroundImageFit) {
+  const img = getCachedImage(image);
+  if (!img || img.width === 0 || img.height === 0) return; // not decoded yet — caller re-renders once it is
+
+  // Anchored at the top-left corner (0,0) rather than centered — an
+  // oversized image (in 'actual' fit, or a 'cover' fit whose aspect ratio
+  // doesn't match the panel) is cropped off its right/bottom edges instead
+  // of symmetrically off all sides.
+  if (fit === 'cover') {
+    const scale = Math.max(canvasWidth / img.width, canvasHeight / img.height);
+    ctx.drawImage(img, 0, 0, img.width * scale, img.height * scale);
+  } else {
+    ctx.drawImage(img, 0, 0);
+  }
+}
+
 function drawTitleBar(ctx: CanvasRenderingContext2D, canvasWidth: number, titleBarHeight: number, titleBarColor: string) {
   ctx.fillStyle = titleBarColor;
   ctx.fillRect(0, 0, canvasWidth, titleBarHeight);
@@ -656,6 +683,8 @@ export function renderBackground(ctx: CanvasRenderingContext2D, canvasWidth: num
     backgroundGradientEnabled,
     colorEnd,
     backgroundGradientAngle,
+    image,
+    imageFit,
     pattern,
     patternColor,
     density,
@@ -696,6 +725,10 @@ export function renderBackground(ctx: CanvasRenderingContext2D, canvasWidth: num
       ctx.fillStyle = color;
     }
     ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+  }
+
+  if (image) {
+    drawBackgroundImage(ctx, canvasWidth, canvasHeight, image, imageFit);
   }
 
   const drawPattern = pattern !== 'none' ? PATTERN_DRAW_FUNCTIONS[pattern] : undefined;

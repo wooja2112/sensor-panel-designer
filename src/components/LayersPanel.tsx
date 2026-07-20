@@ -9,11 +9,11 @@ const ADD_OPTIONS: { mode: GaugeMode; label: string }[] = [
 ];
 
 export function LayersPanel({
-  gauges, selectedId, onSelect, onAdd, onDelete, onReorder,
+  gauges, selectedIds, onSelect, onAdd, onDelete, onReorder,
 }: {
   gauges: GaugeInstance[];
-  selectedId: string | null;
-  onSelect: (id: string) => void;
+  selectedIds: string[];
+  onSelect: (id: string, additive?: boolean) => void;
   onAdd: (mode: GaugeMode) => void;
   onDelete: (id: string) => void;
   onReorder: (id: string, dir: -1 | 1) => void;
@@ -37,10 +37,10 @@ export function LayersPanel({
         <div className="flex flex-col gap-1 max-h-32 overflow-y-auto" style={{ scrollbarWidth: 'thin' }}>
           {gauges.map((g, i) => (
             <div key={g.id}
-              onClick={() => onSelect(g.id)}
+              onClick={e => onSelect(g.id, e.shiftKey || e.ctrlKey || e.metaKey)}
               className={[
                 'flex items-center gap-2 px-2 py-1 rounded text-[11px] cursor-pointer transition-colors',
-                g.id === selectedId ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-secondary/40',
+                selectedIds.includes(g.id) ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-secondary/40',
               ].join(' ')}
             >
               <span className="flex-1 truncate">{g.name}</span>

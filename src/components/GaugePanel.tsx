@@ -21,7 +21,7 @@ const numberInputClass = 'bg-background border border-border rounded px-2 py-1 t
 const textInputClass = 'flex-1 bg-background border border-border rounded px-2 py-1 text-[11px] text-foreground w-full focus:outline-none focus:border-primary/60';
 
 export function GaugePanel({
-  gauge, panel, themes, onChange, onMeta, onOpenThemeDesigner, onDelete, onDuplicate,
+  gauge, panel, themes, onChange, onMeta, onOpenThemeDesigner, onDelete, onDuplicate, onFitToContent,
 }: {
   gauge: GaugeInstance;
   panel: PanelConfig;
@@ -31,6 +31,7 @@ export function GaugePanel({
   onOpenThemeDesigner: () => void;
   onDelete: () => void;
   onDuplicate: () => void;
+  onFitToContent: () => void;
 }) {
   const opts = gauge.opts;
   const mode = opts.mode;
@@ -89,6 +90,10 @@ export function GaugePanel({
           <input type="number" min={1} value={gauge.width} onChange={e => onMeta({ width: Math.max(1, Math.round(+e.target.value || 1)) })} className={numberInputClass} />
           <input type="number" min={1} value={gauge.height} onChange={e => onMeta({ height: Math.max(1, Math.round(+e.target.value || 1)) })} className={numberInputClass} />
         </div>
+        <button type="button" onClick={onFitToContent}
+          className="w-full px-2 py-1.5 text-[10px] border border-border rounded hover:bg-secondary transition-colors cursor-pointer text-foreground"
+          title="Shrink the bounding box down to exactly what this gauge draws — no empty margin"
+        >Fit to content</button>
       </CtrlRow>
 
       <div className="flex gap-2">

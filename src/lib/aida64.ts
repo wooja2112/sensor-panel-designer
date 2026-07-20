@@ -28,6 +28,7 @@ import { renderBackground } from './backgroundRender';
 import { drawOn } from './gaugeRender';
 import type { ThemesMap } from './gaugeRender';
 import type { GaugeInstance, PanelConfig } from '../types';
+import { loadImage } from './imageCache';
 import { resolveDrawOptions } from '../types';
 
 const AIDA_STATE_COUNT = 16;
@@ -103,6 +104,13 @@ async function buildBundleParts(panel: PanelConfig, gauges: GaugeInstance[], the
   }
 
   onProgress?.('Rendering panel background…');
+  if (panel.background.image) {
+    try {
+      await loadImage(panel.background.image);
+    } catch {
+      // Export without the image rather than blocking the whole bundle.
+    }
+  }
   const bgCanvas = document.createElement('canvas');
   bgCanvas.width = Math.max(1, Math.round(panel.width));
   bgCanvas.height = Math.max(1, Math.round(panel.height));
