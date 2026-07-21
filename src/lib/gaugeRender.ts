@@ -261,7 +261,7 @@ export function defaultDrawOptions(mode: GaugeMode = "bar"): DrawOptions {
     dialMax: 100,
     dialTickStep: 10,
     dialTitle: "",
-    dialUnit: "%",
+    dialUnit: "",
     dialSubtext: "",
     dialAccentColor: "#22c55e",
     containerShape: "frame",
