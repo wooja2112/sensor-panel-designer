@@ -46,6 +46,10 @@
 // falls back to showing its first frame when GetValue() returns null, so an
 // unbound gauge still renders (just statically) instead of vanishing — point
 // it at a real sensor from InfoPanel's own item editor after importing.
+//
+// gauge.hwinfoSensorLabel (set in GaugePanel.tsx) can't drive that binding
+// either, for the same reason — it's folded into the item's own <Name> as a
+// reminder of which sensor to pick, nothing more.
 import { renderBackground } from './backgroundRender';
 import { drawOn } from './gaugeRender';
 import type { ThemesMap } from './gaugeRender';
@@ -188,8 +192,10 @@ async function buildBundleParts(panel: PanelConfig, gauges: GaugeInstance[], the
     // gauge's original bounding box to match compose.ts's placement.
     const itemX = Math.round(gauge.x + gauge.width / 2 - renderedWidth / 2);
     const itemY = Math.round(gauge.y + gauge.height / 2 - renderedHeight / 2);
+    const label = gauge.hwinfoSensorLabel.trim();
+    const displayName = label ? `${safeName} (HWInfo: ${xmlEscapeText(label)})` : safeName;
     items.push(
-      `<DisplayItem xsi:type="GaugeDisplayItem"><Name>${safeName}</Name>` +
+      `<DisplayItem xsi:type="GaugeDisplayItem"><Name>${displayName}</Name>` +
       `<X>${itemX}</X><Y>${itemY}</Y>` +
       `<MinValue>0</MinValue><MaxValue>100</MaxValue>` +
       `<Width>${renderedWidth}</Width><Height>${renderedHeight}</Height>` +

@@ -191,7 +191,7 @@ export default function App() {
     setGauges(gs => gs.map(g => g.id === id ? { ...g, opts: { ...g.opts, ...patch } } : g));
   }, []);
 
-  const updateGaugeMeta = useCallback((id: string, patch: Partial<Pick<GaugeInstance, 'name' | 'x' | 'y' | 'width' | 'height' | 'previewValue' | 'themeKey' | 'aidaSensorId'>>) => {
+  const updateGaugeMeta = useCallback((id: string, patch: Partial<Pick<GaugeInstance, 'name' | 'x' | 'y' | 'width' | 'height' | 'previewValue' | 'themeKey' | 'aidaSensorId' | 'hwinfoSensorLabel'>>) => {
     setGauges(gs => gs.map(g => g.id === id ? { ...g, ...patch } : g));
   }, []);
 

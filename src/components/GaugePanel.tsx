@@ -27,7 +27,7 @@ export function GaugePanel({
   panel: PanelConfig;
   themes: ThemesMap;
   onChange: (patch: Partial<DrawOptions>) => void;
-  onMeta: (patch: Partial<Pick<GaugeInstance, 'name' | 'x' | 'y' | 'width' | 'height' | 'previewValue' | 'themeKey' | 'aidaSensorId'>>) => void;
+  onMeta: (patch: Partial<Pick<GaugeInstance, 'name' | 'x' | 'y' | 'width' | 'height' | 'previewValue' | 'themeKey' | 'aidaSensorId' | 'hwinfoSensorLabel'>>) => void;
   onOpenThemeDesigner: () => void;
   onDelete: () => void;
   onDuplicate: () => void;
@@ -145,6 +145,20 @@ export function GaugePanel({
             Find the exact ID in AIDA64's own "Modify Item" search box. Left blank, this gauge is
             exported already enabled and bound to "CPU Utilization" (SCPUUTI) — rebind it in AIDA64
             if it should track something else.
+          </span>
+        </CtrlRow>
+      )}
+
+      {mode !== 'container' && (
+        <CtrlRow label="HWInfo sensor name (optional)">
+          <input value={gauge.hwinfoSensorLabel} onChange={e => onMeta({ hwinfoSensorLabel: e.target.value })}
+            placeholder="e.g. CPU Package"
+            className={textInputClass}
+          />
+          <span className="text-[9px] text-muted-foreground leading-relaxed">
+            HWInfo sensor IDs are specific to the machine running InfoPanel, so this can't bind
+            automatically. Naming it here just tags the exported item so you know which sensor to
+            pick in InfoPanel's own item editor after importing.
           </span>
         </CtrlRow>
       )}

@@ -3,6 +3,7 @@
 // was. Deliberately a different extension from AIDA64's real .sensorpanel
 // format (see lib/aida64.ts) so the two are never confused for one another.
 import type { GaugeInstance, PanelConfig } from '../types';
+import { normalizeGauge } from '../types';
 import type { ThemesMap } from './gaugeRender';
 
 export const SENSOR_PANEL_FILE_VERSION = 1;
@@ -39,7 +40,7 @@ export function parsePanelFile(json: string): SensorPanelFile {
   if (!file.panel || !Array.isArray(file.gauges) || !file.themes) {
     throw new Error('That file is missing expected panel data.');
   }
-  return file as SensorPanelFile;
+  return { ...file, gauges: file.gauges.map(normalizeGauge) } as SensorPanelFile;
 }
 
 export function downloadPanelFile(panel: PanelConfig, gauges: GaugeInstance[], themes: ThemesMap, filename: string) {

@@ -18,6 +18,13 @@ export interface GaugeInstance {
   // Left blank, the exported item defaults to "CPU Utilization" (SCPUUTI)
   // and stays enabled, since AIDA64 hides disabled items entirely.
   aidaSensorId: string;
+  // A human-readable HWInfo sensor name (e.g. "CPU Package") to remind the
+  // user which live sensor to bind this gauge to after importing into
+  // InfoPanel — see lib/infopanel.ts. This is a label, not a real binding:
+  // HWInfo/LibreHardwareMonitor sensor IDs are machine-specific hashes this
+  // app can't know in advance, so the label just gets folded into the
+  // exported item's name as a reminder.
+  hwinfoSensorLabel: string;
 }
 
 export interface PanelConfig {
@@ -44,6 +51,20 @@ export function createGaugeInstance(mode: GaugeMode, themeKey: string, x: number
     themeKey,
     opts: defaultDrawOptions(mode),
     aidaSensorId: '',
+    hwinfoSensorLabel: '',
+  };
+}
+
+// Backfills fields that didn't exist yet when an older .sensorpaneldesign
+// file (or localStorage autosave) was written, so loading one doesn't leave
+// a gauge with `undefined` where code expects a string (e.g. .trim() in
+// lib/infopanel.ts) — same version bucket (SENSOR_PANEL_FILE_VERSION) just
+// gained a new optional-in-practice field rather than a real breaking change.
+export function normalizeGauge(gauge: GaugeInstance): GaugeInstance {
+  return {
+    ...gauge,
+    aidaSensorId: gauge.aidaSensorId ?? '',
+    hwinfoSensorLabel: gauge.hwinfoSensorLabel ?? '',
   };
 }
 
