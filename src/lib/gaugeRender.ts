@@ -111,6 +111,116 @@ function apply3DBarShading(
   ctx.stroke();
 }
 
+// Renders a thermometer-style "bar" gauge: a glass tube capped with a bulb
+// reservoir at the bottom, a mercury column that rises with the value, and
+// dual °F/°C tick scales flanking the tube. °F and °C are linearly related,
+// so both scales can always be shown at once from the same onCount without
+// needing two separate bound values.
+function drawThermometerGauge(
+  ctx: CanvasRenderingContext2D, W: number, H: number, onCount: number, opts: DrawOptions
+) {
+  const cx = W / 2;
+  const tubeW = Math.max(6, Math.min(opts.sw, Math.min(W, H) * 0.22));
+  const tubeHalfW = tubeW / 2;
+  const bulbR = tubeHalfW * 1.7;
+
+  const marginTop = H * 0.06;
+  const marginBottom = H * 0.14;
+  const bulbCY = H - marginBottom - bulbR;
+  const tubeTop = marginTop;
+  // The capsule's rounded bottom cap extends into the bulb, which is drawn
+  // over it afterward — no special-casing needed for the tube/bulb seam.
+  const tubeBottom = bulbCY + tubeHalfW;
+
+  const tubePath = () => roundRect(ctx, cx - tubeHalfW, tubeTop, tubeW, tubeBottom - tubeTop, tubeHalfW);
+  tubePath();
+  ctx.fillStyle = opts.trackColor;
+  ctx.fill();
+
+  // Mercury column — clipped fill growing from the bottom, the same
+  // clip-and-reveal technique the solid flat/ascending bar styles use.
+  const fillFrac = Math.max(0, Math.min(1, onCount / 100));
+  if (fillFrac > 0) {
+    ctx.save();
+    tubePath();
+    ctx.clip();
+    const fillTopY = tubeBottom - fillFrac * (tubeBottom - tubeTop);
+    ctx.fillStyle = opts.mercuryColor;
+    ctx.fillRect(cx - tubeHalfW, fillTopY, tubeW, tubeBottom - fillTopY);
+    ctx.restore();
+  }
+
+  tubePath();
+  ctx.strokeStyle = "rgba(255,255,255,0.4)";
+  ctx.lineWidth = Math.max(1, tubeW * 0.05);
+  ctx.stroke();
+
+  // Bulb reservoir — always full — with a glossy highlight for a rounded,
+  // glass-covered look.
+  ctx.beginPath();
+  ctx.arc(cx, bulbCY, bulbR, 0, Math.PI * 2);
+  ctx.fillStyle = opts.mercuryColor;
+  ctx.fill();
+  ctx.strokeStyle = "rgba(255,255,255,0.4)";
+  ctx.lineWidth = Math.max(1, tubeW * 0.05);
+  ctx.stroke();
+
+  const hl = ctx.createRadialGradient(
+    cx - bulbR * 0.35, bulbCY - bulbR * 0.35, 0,
+    cx - bulbR * 0.35, bulbCY - bulbR * 0.35, bulbR * 0.9
+  );
+  hl.addColorStop(0, "rgba(255,255,255,0.5)");
+  hl.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.beginPath();
+  ctx.arc(cx, bulbCY, bulbR, 0, Math.PI * 2);
+  ctx.fillStyle = hl;
+  ctx.fill();
+
+  // Dual °F / °C tick scales flanking the tube. The lowest tick stops just
+  // above the bulb (rather than at tubeBottom, which runs into the bulb
+  // itself) so it doesn't collide with the °F/°C unit labels beside the
+  // bulb below it — real thermometers leave the same gap.
+  const tickCount = Math.max(2, opts.thermoTickCount);
+  const tickLen = Math.max(4, tubeW * 0.5);
+  const fs = Math.max(9, Math.min(tubeW * 0.85, H * 0.045));
+  const scaleBottom = bulbCY - bulbR - fs * 0.6;
+  ctx.font = `500 ${fs}px sans-serif`;
+  ctx.textBaseline = "middle";
+  for (let i = 0; i < tickCount; i++) {
+    const t = i / (tickCount - 1);
+    const y = scaleBottom - t * (scaleBottom - tubeTop);
+    const tempF = opts.thermoMinF + t * (opts.thermoMaxF - opts.thermoMinF);
+    const tempC = (tempF - 32) * 5 / 9;
+
+    ctx.strokeStyle = "rgba(255,255,255,0.55)";
+    ctx.lineWidth = Math.max(1, tubeW * 0.06);
+
+    ctx.beginPath();
+    ctx.moveTo(cx - tubeHalfW - 2, y);
+    ctx.lineTo(cx - tubeHalfW - 2 - tickLen, y);
+    ctx.stroke();
+    ctx.fillStyle = "rgba(255,255,255,0.85)";
+    ctx.textAlign = "right";
+    ctx.fillText(String(Math.round(tempF)), cx - tubeHalfW - 2 - tickLen - 4, y);
+
+    ctx.beginPath();
+    ctx.moveTo(cx + tubeHalfW + 2, y);
+    ctx.lineTo(cx + tubeHalfW + 2 + tickLen, y);
+    ctx.stroke();
+    ctx.textAlign = "left";
+    ctx.fillText(String(Math.round(tempC)), cx + tubeHalfW + 2 + tickLen + 4, y);
+  }
+
+  // Unit labels flanking the bulb, at the bulb's own vertical center so
+  // they stay clear of the lowest tick label above.
+  const unitFs = Math.max(9, fs * 1.1);
+  ctx.font = `600 ${unitFs}px sans-serif`;
+  ctx.fillStyle = "rgba(255,255,255,0.85)";
+  ctx.textAlign = "center";
+  ctx.fillText("°F", cx - bulbR - Math.max(6, tickLen * 0.5), bulbCY);
+  ctx.fillText("°C", cx + bulbR + Math.max(6, tickLen * 0.5), bulbCY);
+}
+
 // Overlays the same glossy 3D treatment as apply3DBarShading onto a circular
 // gauge's ring: a faint ambient radial gradient across the ring's thickness
 // (the tube's own curvature) plus a directional highlight/shadow that sweeps
@@ -170,7 +280,8 @@ export function makeStamp() {
   return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
 }
 
-export type BarStyle = "flat" | "ascending" | "slanted";
+export type BarStyle = "flat" | "ascending" | "slanted" | "thermometer";
+export type ThermoUnit = "F" | "C";
 export type NeedleStyle = "plain" | "classic";
 
 export interface DrawOptions {
@@ -179,6 +290,11 @@ export interface DrawOptions {
   barStyle: BarStyle;
   sw: number;
   gap: number;
+  mercuryColor: string;
+  thermoUnit: ThermoUnit;
+  thermoMinF: number;
+  thermoMaxF: number;
+  thermoTickCount: number;
   gauge3D: boolean;
   lightAngle: number;
   colorMode: ColorMode;
@@ -231,6 +347,11 @@ export function defaultDrawOptions(mode: GaugeMode = "bar"): DrawOptions {
     barStyle: "flat",
     sw: 16,
     gap: 3,
+    mercuryColor: "#d21f1f",
+    thermoUnit: "F",
+    thermoMinF: 32,
+    thermoMaxF: 212,
+    thermoTickCount: 5,
     gauge3D: false,
     lightAngle: 0,
     colorMode: "zone",
@@ -620,7 +741,13 @@ export function drawOn(canvas: HTMLCanvasElement, onCount: number, opts: DrawOpt
   const isSolid = nSegs === 0;
   const pctOf = (oc: number, total: number) => isSolid ? oc : Math.round((oc / total) * 100);
 
-  if (mode === "bar") {
+  if (mode === "bar" && opts.barStyle === "thermometer") {
+    // The thermometer is always upright — a rotated thermometer reads as
+    // broken, unlike a rotated segmented/flat bar — so rotation is ignored
+    // and it gets its own layout entirely instead of sharing the
+    // horizontal flat/ascending/slanted geometry below.
+    drawThermometerGauge(ctx, W, H, onCount, opts);
+  } else if (mode === "bar") {
     // Rotate around the actual (possibly swapped-for-90°/270°) canvas
     // center, then shift by the logical W/H center so the unrotated layout
     // below still lands correctly inside the rotated canvas.

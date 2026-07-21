@@ -35,6 +35,7 @@ export function GaugePanel({
 }) {
   const opts = gauge.opts;
   const mode = opts.mode;
+  const isThermo = mode === 'bar' && opts.barStyle === 'thermometer';
 
   // Centers the gauge's own X/Y-plus-half-size midpoint on the panel — the
   // same midpoint compose.ts and CanvasWorkspace already treat as "the
@@ -51,6 +52,21 @@ export function GaugePanel({
       labelPos: m !== 'circ' && opts.labelPos === 'middle' ? 'top' : opts.labelPos,
     });
     onMeta({ width: size.width, height: size.height });
+  };
+
+  const selectBarStyle = (style: DrawOptions['barStyle']) => {
+    // Thermometer needs a tall box to read correctly (the default bar size
+    // is short and wide), and has no notion of segments — mirrors how
+    // switchMode resizes on a mode change. Re-centered too, since jumping
+    // between a short-wide and a tall-narrow box while keeping the old x/y
+    // can push most of the gauge (e.g. the thermometer's bulb) off-panel.
+    const recenter = (w: number, h: number) => onMeta({
+      width: w, height: h,
+      x: Math.round((panel.width - w) / 2), y: Math.round((panel.height - h) / 2),
+    });
+    if (style === 'thermometer') recenter(140, 320);
+    else if (opts.barStyle === 'thermometer') recenter(240, 60);
+    onChange({ barStyle: style, nSegs: style === 'thermometer' ? 0 : opts.nSegs });
   };
 
   const toggleContainerCorner = (c: ContainerCorner) => {
@@ -268,7 +284,7 @@ export function GaugePanel({
       )}
 
       {/* Segments */}
-      {mode !== 'needle' && mode !== 'container' && (
+      {mode !== 'needle' && mode !== 'container' && !isThermo && (
         <CtrlRow label="Segments">
           <div className="flex gap-1.5 flex-wrap">
             <Pill active={opts.nSegs === 0} onClick={() => onChange({ nSegs: 0 })}>Solid</Pill>
@@ -279,7 +295,7 @@ export function GaugePanel({
         </CtrlRow>
       )}
 
-      {mode !== 'needle' && mode !== 'container' && (
+      {mode !== 'needle' && mode !== 'container' && !isThermo && (
         <CtrlRow label="Color mode">
           <div className="flex gap-1.5">
             {(['zone', 'solid', 'mono'] as ColorMode[]).map(m => (
@@ -289,7 +305,7 @@ export function GaugePanel({
         </CtrlRow>
       )}
 
-      {mode !== 'needle' && mode !== 'container' && opts.colorMode === 'solid' && (
+      {mode !== 'needle' && mode !== 'container' && !isThermo && opts.colorMode === 'solid' && (
         <CtrlRow label="Color">
           <div className="flex gap-1.5 flex-wrap items-center">
             {SOLID_SWATCHES.map(c => (
@@ -308,12 +324,12 @@ export function GaugePanel({
       )}
 
       {mode !== 'container' && (
-        <CtrlRow label={mode === 'needle' ? `Zone ring width — ${opts.sw}px` : `Stroke / bar height — ${opts.sw}px`}>
+        <CtrlRow label={mode === 'needle' ? `Zone ring width — ${opts.sw}px` : isThermo ? `Tube width — ${opts.sw}px` : `Stroke / bar height — ${opts.sw}px`}>
           <SliderRow value={opts.sw} min={6} max={72} onChange={v => onChange({ sw: v })} />
         </CtrlRow>
       )}
 
-      {mode !== 'needle' && mode !== 'container' && opts.nSegs > 0 && (
+      {mode !== 'needle' && mode !== 'container' && !isThermo && opts.nSegs > 0 && (
         <CtrlRow label={`Gap between segments — ${opts.gap}px`}>
           <SliderRow value={opts.gap} min={0} max={50} onChange={v => onChange({ gap: v })} />
         </CtrlRow>
@@ -321,15 +337,56 @@ export function GaugePanel({
 
       {mode === 'bar' && (
         <CtrlRow label="Bar style">
-          <div className="flex gap-1.5">
-            <Pill active={opts.barStyle === 'flat'} onClick={() => onChange({ barStyle: 'flat' })}>Flat</Pill>
-            <Pill active={opts.barStyle === 'ascending'} onClick={() => onChange({ barStyle: 'ascending' })}>Ascending</Pill>
-            <Pill active={opts.barStyle === 'slanted'} onClick={() => onChange({ barStyle: 'slanted' })}>Slanted</Pill>
+          <div className="flex gap-1.5 flex-wrap">
+            <Pill active={opts.barStyle === 'flat'} onClick={() => selectBarStyle('flat')}>Flat</Pill>
+            <Pill active={opts.barStyle === 'ascending'} onClick={() => selectBarStyle('ascending')}>Ascending</Pill>
+            <Pill active={opts.barStyle === 'slanted'} onClick={() => selectBarStyle('slanted')}>Slanted</Pill>
+            <Pill active={opts.barStyle === 'thermometer'} onClick={() => selectBarStyle('thermometer')}>Thermometer</Pill>
           </div>
         </CtrlRow>
       )}
 
-      {mode !== 'needle' && mode !== 'container' && (
+      {isThermo && (
+        <>
+          <CtrlRow label="Mercury color">
+            <ColorField value={opts.mercuryColor} onChange={v => onChange({ mercuryColor: v })} />
+          </CtrlRow>
+          <CtrlRow label="Temperature entry unit">
+            <div className="flex gap-1.5">
+              <Pill active={opts.thermoUnit === 'F'} onClick={() => onChange({ thermoUnit: 'F' })}>°F</Pill>
+              <Pill active={opts.thermoUnit === 'C'} onClick={() => onChange({ thermoUnit: 'C' })}>°C</Pill>
+            </div>
+          </CtrlRow>
+          <CtrlRow label={`Temperature range (°${opts.thermoUnit})`}>
+            <div className="grid grid-cols-2 gap-2">
+              <input type="number"
+                value={Math.round(opts.thermoUnit === 'F' ? opts.thermoMinF : (opts.thermoMinF - 32) * 5 / 9)}
+                onChange={e => {
+                  const v = +e.target.value || 0;
+                  onChange({ thermoMinF: opts.thermoUnit === 'F' ? v : v * 9 / 5 + 32 });
+                }}
+                className={numberInputClass} title="Minimum (bottom of the tube)"
+              />
+              <input type="number"
+                value={Math.round(opts.thermoUnit === 'F' ? opts.thermoMaxF : (opts.thermoMaxF - 32) * 5 / 9)}
+                onChange={e => {
+                  const v = +e.target.value || 0;
+                  onChange({ thermoMaxF: opts.thermoUnit === 'F' ? v : v * 9 / 5 + 32 });
+                }}
+                className={numberInputClass} title="Maximum (top of the tube)"
+              />
+            </div>
+            <span className="text-[9px] text-muted-foreground leading-relaxed">
+              Both °F and °C scales always show — this just picks which unit you're typing in.
+            </span>
+          </CtrlRow>
+          <CtrlRow label={`Tick marks — ${opts.thermoTickCount}`}>
+            <SliderRow value={opts.thermoTickCount} min={2} max={11} onChange={v => onChange({ thermoTickCount: v })} />
+          </CtrlRow>
+        </>
+      )}
+
+      {mode !== 'needle' && mode !== 'container' && !isThermo && (
         <CtrlRow label={mode === 'circ' ? 'Inner ring 3D effect' : '3D effect'}>
           <div className="flex gap-1.5">
             <Pill active={opts.gauge3D} onClick={() => onChange({ gauge3D: true })}>On</Pill>
@@ -483,7 +540,7 @@ export function GaugePanel({
         </>
       )}
 
-      {mode !== 'container' && (
+      {mode !== 'container' && !isThermo && (
         <CtrlRow label="Rotation">
           <div className="flex gap-1.5">
             {[0, 90, 180, 270].map(deg => (
@@ -519,7 +576,7 @@ export function GaugePanel({
         </CtrlRow>
       )}
 
-      {mode !== 'container' && (
+      {mode !== 'container' && !isThermo && (
         <CtrlRow label="Value label">
           <div className="flex gap-1.5">
             <Pill active={opts.showLabel} onClick={() => onChange({ showLabel: true })}>On</Pill>
@@ -528,7 +585,7 @@ export function GaugePanel({
         </CtrlRow>
       )}
 
-      {mode !== 'container' && opts.showLabel && (
+      {mode !== 'container' && !isThermo && opts.showLabel && (
         <CtrlRow label="Label position">
           <div className="flex gap-1.5 flex-wrap">
             {(['top', 'bottom', 'left', 'right'] as LabelPos[]).map(p => (
@@ -541,7 +598,7 @@ export function GaugePanel({
         </CtrlRow>
       )}
 
-      {mode !== 'container' && opts.showLabel && opts.labelPos !== 'middle' && (
+      {mode !== 'container' && !isThermo && opts.showLabel && opts.labelPos !== 'middle' && (
         <CtrlRow label={`Label offset — ${opts.labelPad}px`}>
           <SliderRow value={opts.labelPad} min={0} max={60} onChange={v => onChange({ labelPad: v })} />
         </CtrlRow>
