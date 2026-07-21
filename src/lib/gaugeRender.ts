@@ -52,20 +52,39 @@ export function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w
   ctx.closePath();
 }
 
+// A rightward-leaning parallelogram — the "slanted segment" LED-meter look.
+// skew shifts the top edge right relative to the bottom edge by `skew` px,
+// so consecutive segments (translated by segW+gap) keep a constant visual
+// gap along their full slanted height.
+function slantPath(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, skew: number) {
+  ctx.beginPath();
+  ctx.moveTo(x + skew, y);
+  ctx.lineTo(x + w + skew, y);
+  ctx.lineTo(x + w, y + h);
+  ctx.lineTo(x, y + h);
+  ctx.closePath();
+}
+
 // Overlays a glossy directional-light gradient, highlight band, and edge
-// border onto an already-filled rounded-rect region, giving a bar segment a
-// raised, 3D "capsule" look. lightDeg is measured clockwise from "light
-// shining from directly above" (0°), matching the on-canvas up direction.
-function apply3DBarShading(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number, lightDeg: number) {
+// border onto an already-filled region, giving a bar segment a raised, 3D
+// "capsule" look. lightDeg is measured clockwise from "light shining from
+// directly above" (0°), matching the on-canvas up direction. Clips to a
+// rounded rect by default; pass shapePath to clip to a different silhouette
+// (e.g. a slanted parallelogram) instead.
+function apply3DBarShading(
+  ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number, lightDeg: number,
+  shapePath?: () => void
+) {
   const cx = x + w / 2, cy = y + h / 2;
   const theta = lightDeg * Math.PI / 180;
   const hx = Math.sin(theta), hy = -Math.cos(theta);
   const e = Math.abs(hx) * w / 2 + Math.abs(hy) * h / 2;
   const bx = cx + hx * e, by = cy + hy * e; // point facing the light (brightest)
   const dx = cx - hx * e, dy = cy - hy * e; // point facing away (darkest)
+  const path = shapePath ?? (() => roundRect(ctx, x, y, w, h, r));
 
   ctx.save();
-  roundRect(ctx, x, y, w, h, r);
+  path();
   ctx.clip();
 
   const shade = ctx.createLinearGradient(bx, by, dx, dy);
@@ -86,7 +105,7 @@ function apply3DBarShading(ctx: CanvasRenderingContext2D, x: number, y: number, 
   ctx.restore();
 
   // Edge border for definition
-  roundRect(ctx, x, y, w, h, r);
+  path();
   ctx.strokeStyle = "rgba(0,0,0,0.35)";
   ctx.lineWidth = Math.max(1, h * 0.05);
   ctx.stroke();
@@ -151,7 +170,7 @@ export function makeStamp() {
   return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
 }
 
-export type BarStyle = "flat" | "ascending";
+export type BarStyle = "flat" | "ascending" | "slanted";
 
 export interface DrawOptions {
   mode: GaugeMode;
@@ -626,6 +645,7 @@ export function drawOn(canvas: HTMLCanvasElement, onCount: number, opts: DrawOpt
       // as a common baseline, with bH — normally the flat bar's fixed
       // thickness — acting as the tallest (rightmost) bar's height instead.
       const ascending = opts.barStyle === "ascending";
+      const slanted = opts.barStyle === "slanted";
       const baselineY = oy + bH;
       const minHeightFrac = 0.15;
       for (let i = 0; i < nSegs; i++) {
@@ -635,10 +655,15 @@ export function drawOn(canvas: HTMLCanvasElement, onCount: number, opts: DrawOpt
           : bH;
         const segY = ascending ? baselineY - segH : oy;
         const r = ascending ? Math.min(segR, segH / 3) : segR;
+        const skew = segH * 0.35;
         ctx.fillStyle = i < onCount ? getSegFill(i, nSegs, opts) : track;
-        roundRect(ctx, segX, segY, segW, segH, r);
+        if (slanted) slantPath(ctx, segX, segY, segW, segH, skew);
+        else roundRect(ctx, segX, segY, segW, segH, r);
         ctx.fill();
-        if (opts.gauge3D) apply3DBarShading(ctx, segX, segY, segW, segH, r, opts.lightAngle);
+        if (opts.gauge3D) {
+          apply3DBarShading(ctx, segX, segY, segW, segH, r, opts.lightAngle,
+            slanted ? () => slantPath(ctx, segX, segY, segW, segH, skew) : undefined);
+        }
       }
     }
 

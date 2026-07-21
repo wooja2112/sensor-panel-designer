@@ -324,6 +324,7 @@ export function GaugePanel({
           <div className="flex gap-1.5">
             <Pill active={opts.barStyle === 'flat'} onClick={() => onChange({ barStyle: 'flat' })}>Flat</Pill>
             <Pill active={opts.barStyle === 'ascending'} onClick={() => onChange({ barStyle: 'ascending' })}>Ascending</Pill>
+            <Pill active={opts.barStyle === 'slanted'} onClick={() => onChange({ barStyle: 'slanted' })}>Slanted</Pill>
           </div>
         </CtrlRow>
       )}
