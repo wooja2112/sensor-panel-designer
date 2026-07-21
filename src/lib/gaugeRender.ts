@@ -171,6 +171,7 @@ export function makeStamp() {
 }
 
 export type BarStyle = "flat" | "ascending" | "slanted";
+export type NeedleStyle = "plain" | "classic";
 
 export interface DrawOptions {
   mode: GaugeMode;
@@ -203,6 +204,14 @@ export interface DrawOptions {
   needleCenterBorderColor: string;
   needleColor: string;
   tickLength: number;
+  needleStyle: NeedleStyle;
+  dialMin: number;
+  dialMax: number;
+  dialTickStep: number;
+  dialTitle: string;
+  dialUnit: string;
+  dialSubtext: string;
+  dialAccentColor: string;
   containerShape: ContainerShape;
   containerColor1: string;
   containerColor2: string;
@@ -247,6 +256,14 @@ export function defaultDrawOptions(mode: GaugeMode = "bar"): DrawOptions {
     needleCenterBorderColor: "#e5e5e5",
     needleColor: "#e5484d",
     tickLength: 16,
+    needleStyle: "plain",
+    dialMin: 0,
+    dialMax: 100,
+    dialTickStep: 10,
+    dialTitle: "",
+    dialUnit: "%",
+    dialSubtext: "",
+    dialAccentColor: "#22c55e",
     containerShape: "frame",
     containerColor1: "#3b82f6",
     containerColor2: "#a855f7",
@@ -346,6 +363,48 @@ function drawZoneRing(
   }
   ctx.shadowBlur = 0;
   ctx.lineCap = prevCap;
+}
+
+// Renders the "classic" automotive-dial needle style's face content —
+// title, unit text, and an optional sub-label + accent bar — centered on
+// the dark face. Drawn before the needle/hub so the pointer visually passes
+// in front of the printed face, like a real instrument.
+function drawClassicDialFace(
+  ctx: CanvasRenderingContext2D, cx: number, cy: number, faceR: number, opts: DrawOptions
+) {
+  const titleLines = opts.dialTitle.split("\n").map(s => s.trim()).filter(Boolean).slice(0, 2);
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+
+  let y = cy - faceR * 0.56;
+  const titleFs = Math.max(7, faceR * 0.115);
+  ctx.font = `600 ${titleFs}px sans-serif`;
+  ctx.fillStyle = "rgba(255,255,255,0.92)";
+  for (const line of titleLines) {
+    ctx.fillText(line, cx, y);
+    y += titleFs * 1.05;
+  }
+  if (titleLines.length > 0) y += faceR * 0.05;
+
+  if (opts.dialUnit) {
+    const unitFs = Math.max(7, faceR * 0.13);
+    ctx.font = `500 ${unitFs}px sans-serif`;
+    ctx.fillStyle = "rgba(255,255,255,0.8)";
+    ctx.fillText(opts.dialUnit, cx, y + unitFs * 0.6);
+  }
+
+  // Sub-label + accent bar near the bottom of the face
+  const barY = cy + faceR * 0.66;
+  if (opts.dialSubtext) {
+    const subFs = Math.max(6, faceR * 0.1);
+    ctx.font = `500 ${subFs}px sans-serif`;
+    ctx.fillStyle = "rgba(255,255,255,0.6)";
+    ctx.fillText(opts.dialSubtext, cx, barY - faceR * 0.15);
+  }
+  const barW = faceR * 0.55, barH = Math.max(3, faceR * 0.065);
+  roundRect(ctx, cx - barW / 2, barY, barW, barH, barH / 2);
+  ctx.fillStyle = opts.dialAccentColor;
+  ctx.fill();
 }
 
 // Strokes a glowing neon line/path: a soft blurred halo (stroked twice, wider
@@ -455,9 +514,12 @@ export interface GaugeLayout {
 // bounding box ("make same size" in App.tsx) without duplicating — and
 // risking drifting from — this math.
 export function computeGaugeLayout(W: number, H: number, opts: DrawOptions, ctx?: CanvasRenderingContext2D): GaugeLayout {
-  const { sw, showLabel, labelPos } = opts;
+  const { sw, labelPos } = opts;
   const pad = opts.labelPad;
   const r_base = Math.min(W, H) * 0.36;
+  // The classic needle dial shows its value in an in-face digital box
+  // instead of the usual outside label, so it never needs label space.
+  const showLabel = opts.showLabel && !(opts.mode === "needle" && opts.needleStyle === "classic");
 
   // Estimate font size using base radius so we can compute label space
   const fs_est = Math.max(10, Math.min(r_base * 0.38, H * 0.13));
@@ -700,51 +762,131 @@ export function drawOn(canvas: HTMLCanvasElement, onCount: number, opts: DrawOpt
     const sdRad = sd * Math.PI / 180 + rotRad;
     const edRad = ed * Math.PI / 180 + rotRad;
     const isNeedle = mode === "needle";
+    const classic = isNeedle && opts.needleStyle === "classic";
 
     if (isNeedle) {
-      // The needle gauge's only ring is the static zone band (width = sw).
-      drawZoneRing(ctx, cx, cy, r, sw, sdRad, span, opts.themeColors.zone);
+      // faceR is the radius just inside the ring/bezel — same quantity
+      // either style treats as "where the ticks start counting inward from".
+      const faceR = r - sw / 2;
 
-      // Inner tick marks — 11 evenly-spaced hashmarks just inside the ring.
-      const tickCount = 11;
-      const tickGap = 4;
-      const tickOuterR = Math.max(10, r - sw / 2 - tickGap);
-      const tickLen = Math.max(2, Math.min(opts.tickLength, tickOuterR - 4));
-      const tickInnerR = tickOuterR - tickLen;
-      const tickWidth = Math.max(1.5, sw * 0.08);
-      ctx.lineCap = "butt";
-      for (let i = 0; i < tickCount; i++) {
-        const t = i / (tickCount - 1);
-        const ang = sdRad + t * (span * Math.PI / 180);
-        const cosA = Math.cos(ang), sinA = Math.sin(ang);
-        ctx.beginPath();
-        ctx.moveTo(cx + cosA * tickOuterR, cy + sinA * tickOuterR);
-        ctx.lineTo(cx + cosA * tickInnerR, cy + sinA * tickInnerR);
-        ctx.strokeStyle = "rgba(255,255,255,0.55)";
-        ctx.lineWidth = tickWidth;
+      if (classic) {
+        // Dark instrument face, then a thick chrome bezel reusing the same
+        // glossy directional shading the outer zone ring gets elsewhere —
+        // full-circle, so startRad/endRad just span 0..2π.
+        ctx.beginPath(); ctx.arc(cx, cy, faceR, 0, Math.PI * 2);
+        const faceGrad = ctx.createRadialGradient(cx, cy, faceR * 0.15, cx, cy, faceR);
+        faceGrad.addColorStop(0, "#2b2c30");
+        faceGrad.addColorStop(1, "#08090a");
+        ctx.fillStyle = faceGrad;
+        ctx.fill();
+
+        ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx.strokeStyle = "#aeb2b8";
+        ctx.lineWidth = sw;
         ctx.stroke();
+        apply3DRingShading(ctx, cx, cy, r, sw, 0, Math.PI * 2, opts.lightAngle);
+      } else {
+        // The plain needle gauge's only ring is the static zone band (width = sw).
+        drawZoneRing(ctx, cx, cy, r, sw, sdRad, span, opts.themeColors.zone);
       }
 
+      // Inner tick marks, just inside the ring/bezel.
+      const tickGap = 4;
+      const tickOuterR = Math.max(10, faceR - tickGap);
+      const tickWidth = Math.max(1.5, sw * 0.08);
+      ctx.lineCap = "butt";
+
+      if (classic) {
+        // Major ticks every dialTickStep across [dialMin, dialMax], each
+        // numbered, with 4 unlabeled minor ticks in between — like a real
+        // speedometer face.
+        const range = opts.dialMax - opts.dialMin;
+        const step = Math.max(1, opts.dialTickStep);
+        const majorCount = Math.max(2, Math.round(Math.abs(range) / step) + 1);
+        const minorPerMajor = 5;
+        const totalMinor = (majorCount - 1) * minorPerMajor;
+        const majorLen = Math.max(4, Math.min(opts.tickLength, tickOuterR - 4));
+        const minorLen = majorLen * 0.45;
+        const labelFs = Math.max(7, Math.min(faceR * 0.09, H * 0.04));
+        // Numbers sit at a fixed radius hugging the rim regardless of tick
+        // length, so they stay confined to the outer band of the face and
+        // never crowd the title/value box occupying the center.
+        const labelR = faceR * 0.78;
+        ctx.font = `500 ${labelFs}px sans-serif`;
+        ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        for (let i = 0; i <= totalMinor; i++) {
+          const t = i / totalMinor;
+          const ang = sdRad + t * (span * Math.PI / 180);
+          const cosA = Math.cos(ang), sinA = Math.sin(ang);
+          const isMajor = i % minorPerMajor === 0;
+          const len = isMajor ? majorLen : minorLen;
+          const inner = tickOuterR - len;
+          ctx.beginPath();
+          ctx.moveTo(cx + cosA * tickOuterR, cy + sinA * tickOuterR);
+          ctx.lineTo(cx + cosA * inner, cy + sinA * inner);
+          ctx.strokeStyle = isMajor ? "rgba(255,255,255,0.92)" : "rgba(255,255,255,0.45)";
+          ctx.lineWidth = isMajor ? tickWidth * 1.3 : tickWidth * 0.7;
+          ctx.stroke();
+          if (isMajor) {
+            const tickValue = Math.round(opts.dialMin + t * range);
+            ctx.fillStyle = "rgba(255,255,255,0.85)";
+            ctx.fillText(String(tickValue), cx + cosA * labelR, cy + sinA * labelR);
+          }
+        }
+      } else {
+        // 11 evenly-spaced, unlabeled hashmarks.
+        const tickCount = 11;
+        const tickLen = Math.max(2, Math.min(opts.tickLength, tickOuterR - 4));
+        const tickInnerR = tickOuterR - tickLen;
+        for (let i = 0; i < tickCount; i++) {
+          const t = i / (tickCount - 1);
+          const ang = sdRad + t * (span * Math.PI / 180);
+          const cosA = Math.cos(ang), sinA = Math.sin(ang);
+          ctx.beginPath();
+          ctx.moveTo(cx + cosA * tickOuterR, cy + sinA * tickOuterR);
+          ctx.lineTo(cx + cosA * tickInnerR, cy + sinA * tickInnerR);
+          ctx.strokeStyle = "rgba(255,255,255,0.55)";
+          ctx.lineWidth = tickWidth;
+          ctx.stroke();
+        }
+      }
+
+      // Needle. For the classic dial it's drawn *before* the face content
+      // (title/unit/etc.) below, so that overlay paints over the needle's
+      // base and pivot — the needle reads as emerging from behind the
+      // instrument cluster, same as a real dashboard gauge. The plain style
+      // has no such overlay, so its needle (and hub) stay on top, drawn last.
       const angle = sdRad + (onCount / 100) * (span * Math.PI / 180);
       const needleLen = Math.max(10, tickOuterR);
-      const needleW = Math.max(2, opts.needleCenterDia * 0.12);
-      ctx.lineCap = "round";
-      ctx.strokeStyle = opts.needleColor;
-      ctx.lineWidth = needleW;
-      ctx.beginPath();
-      ctx.moveTo(cx, cy);
-      ctx.lineTo(cx + Math.cos(angle) * needleLen, cy + Math.sin(angle) * needleLen);
-      ctx.stroke();
+      const needleW = classic ? Math.max(2, faceR * 0.045) : Math.max(2, opts.needleCenterDia * 0.12);
+      const drawNeedle = () => {
+        ctx.lineCap = "round";
+        ctx.strokeStyle = opts.needleColor;
+        ctx.lineWidth = needleW;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(cx + Math.cos(angle) * needleLen, cy + Math.sin(angle) * needleLen);
+        ctx.stroke();
+      };
+      const drawHub = () => {
+        const hubR = opts.needleCenterDia / 2;
+        const borderW = Math.max(1.5, opts.needleCenterDia * 0.08);
+        ctx.beginPath();
+        ctx.arc(cx, cy, hubR, 0, Math.PI * 2);
+        ctx.fillStyle = opts.needleCenterColor;
+        ctx.fill();
+        ctx.lineWidth = borderW;
+        ctx.strokeStyle = opts.needleCenterBorderColor;
+        ctx.stroke();
+      };
 
-      const hubR = opts.needleCenterDia / 2;
-      const borderW = Math.max(1.5, opts.needleCenterDia * 0.08);
-      ctx.beginPath();
-      ctx.arc(cx, cy, hubR, 0, Math.PI * 2);
-      ctx.fillStyle = opts.needleCenterColor;
-      ctx.fill();
-      ctx.lineWidth = borderW;
-      ctx.strokeStyle = opts.needleCenterBorderColor;
-      ctx.stroke();
+      if (classic) {
+        drawNeedle();
+        drawClassicDialFace(ctx, cx, cy, faceR, opts);
+      } else {
+        drawNeedle();
+        drawHub();
+      }
     } else if (isSolid) {
       // Solid arc: track + fill — flat caps so the ends align exactly with
       // sdRad/edRad (and thus with the outer zone ring's flat-capped bands).
@@ -814,7 +956,7 @@ export function drawOn(canvas: HTMLCanvasElement, onCount: number, opts: DrawOpt
       if (opts.outerRing3D) apply3DRingShading(ctx, cx, cy, ringR, opts.outerRingWidth, sdRad, edRad, opts.lightAngle);
     }
 
-    if (showLabel) {
+    if (showLabel && !classic) {
       const pct = pctOf(onCount, nSegs);
       ctx.fillStyle = isNeedle
         ? getZoneColor(onCount / 100, opts.themeColors)

@@ -338,7 +338,8 @@ export function GaugePanel({
         </CtrlRow>
       )}
 
-      {mode !== 'needle' && mode !== 'container' && (opts.gauge3D || (mode === 'circ' && opts.outerRing && opts.outerRing3D)) && (
+      {((mode !== 'needle' && mode !== 'container' && (opts.gauge3D || (mode === 'circ' && opts.outerRing && opts.outerRing3D)))
+        || (mode === 'needle' && opts.needleStyle === 'classic')) && (
         <CtrlRow label={`Light direction — ${opts.lightAngle}°`}>
           <SliderRow value={opts.lightAngle} min={0} max={360} onChange={v => onChange({ lightAngle: v })} />
         </CtrlRow>
@@ -413,12 +414,20 @@ export function GaugePanel({
       {mode === 'needle' && (
         <>
           <div className="border-t border-border/50" />
+          <CtrlRow label="Dial style">
+            <div className="flex gap-1.5">
+              <Pill active={opts.needleStyle === 'plain'} onClick={() => onChange({ needleStyle: 'plain' })}>Plain</Pill>
+              <Pill active={opts.needleStyle === 'classic'} onClick={() => onChange({ needleStyle: 'classic' })}>Classic</Pill>
+            </div>
+          </CtrlRow>
           <CtrlRow label={`Hash mark length — ${opts.tickLength}px`}>
             <SliderRow value={opts.tickLength} min={2} max={60} onChange={v => onChange({ tickLength: v })} />
           </CtrlRow>
-          <CtrlRow label={`Needle center diameter — ${opts.needleCenterDia}px`}>
-            <SliderRow value={opts.needleCenterDia} min={10} max={120} onChange={v => onChange({ needleCenterDia: v })} />
-          </CtrlRow>
+          {opts.needleStyle !== 'classic' && (
+            <CtrlRow label={`Needle center diameter — ${opts.needleCenterDia}px`}>
+              <SliderRow value={opts.needleCenterDia} min={10} max={120} onChange={v => onChange({ needleCenterDia: v })} />
+            </CtrlRow>
+          )}
           <CtrlRow label="Needle center color">
             <ColorField value={opts.needleCenterColor} onChange={v => onChange({ needleCenterColor: v })} />
           </CtrlRow>
@@ -428,6 +437,49 @@ export function GaugePanel({
           <CtrlRow label="Needle color">
             <ColorField value={opts.needleColor} onChange={v => onChange({ needleColor: v })} />
           </CtrlRow>
+
+          {opts.needleStyle === 'classic' && (
+            <>
+              <CtrlRow label="Dial title">
+                <textarea value={opts.dialTitle} onChange={e => onChange({ dialTitle: e.target.value })}
+                  placeholder={'e.g. CPU\nUtilization'} rows={2}
+                  className={textInputClass + ' resize-none'}
+                />
+                <span className="text-[9px] text-muted-foreground leading-relaxed">
+                  Up to 2 lines, shown in the middle of the dial.
+                </span>
+              </CtrlRow>
+              <CtrlRow label="Dial unit">
+                <input value={opts.dialUnit} onChange={e => onChange({ dialUnit: e.target.value })}
+                  placeholder="e.g. %" className={textInputClass}
+                />
+              </CtrlRow>
+              <CtrlRow label="Dial sub-label (optional)">
+                <input value={opts.dialSubtext} onChange={e => onChange({ dialSubtext: e.target.value })}
+                  placeholder="e.g. 5500 MHz" className={textInputClass}
+                />
+              </CtrlRow>
+              <CtrlRow label="Accent bar color">
+                <ColorField value={opts.dialAccentColor} onChange={v => onChange({ dialAccentColor: v })} />
+              </CtrlRow>
+              <CtrlRow label="Dial value range">
+                <div className="grid grid-cols-3 gap-2">
+                  <input type="number" value={opts.dialMin} onChange={e => onChange({ dialMin: Math.round(+e.target.value || 0) })}
+                    className={numberInputClass} title="Minimum (tick label at the start of the arc)"
+                  />
+                  <input type="number" value={opts.dialMax} onChange={e => onChange({ dialMax: Math.round(+e.target.value || 0) })}
+                    className={numberInputClass} title="Maximum (tick label at the end of the arc)"
+                  />
+                  <input type="number" min={1} value={opts.dialTickStep} onChange={e => onChange({ dialTickStep: Math.max(1, Math.round(+e.target.value || 1)) })}
+                    className={numberInputClass} title="Step between numbered ticks"
+                  />
+                </div>
+                <span className="text-[9px] text-muted-foreground leading-relaxed">
+                  Min / max / step for the numbered tick marks around the dial.
+                </span>
+              </CtrlRow>
+            </>
+          )}
         </>
       )}
 
