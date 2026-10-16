@@ -26,6 +26,20 @@ export interface GaugeInstance {
   // app can't know in advance, so the label just gets folded into the
   // exported item's name as a reminder.
   hwinfoSensorLabel: string;
+  // Bitmap for image-mode gauges (and for imported AIDA/InfoPanel frames
+  // that couldn't be reconstructed as live DrawOptions). When set, compose
+  // draws this instead of drawOn().
+  importedImage: string | null;
+}
+
+export interface ImportedText {
+  text: string;
+  font: string;
+  fontSize: number;
+  bold: boolean;
+  italic: boolean;
+  color: string;
+  align: 'left' | 'center' | 'right';
 }
 
 export interface PanelConfig {
@@ -43,7 +57,7 @@ export function createGaugeInstance(mode: GaugeMode, themeKey: string, x: number
   const { width, height } = defaultSizeForMode(mode);
   return {
     id: makeGaugeId(),
-    name: mode === 'bar' ? 'Bar gauge' : mode === 'circ' ? 'Circular gauge' : mode === 'needle' ? 'Needle gauge' : 'Container',
+    name: mode === 'bar' ? 'Bar gauge' : mode === 'circ' ? 'Circular gauge' : mode === 'needle' ? 'Needle gauge' : mode === 'text' ? 'Label' : mode === 'image' ? 'Image' : 'Container',
     x: Math.round(x - width / 2),
     y: Math.round(y - height / 2),
     width,
@@ -53,6 +67,7 @@ export function createGaugeInstance(mode: GaugeMode, themeKey: string, x: number
     opts: defaultDrawOptions(mode),
     aidaSensorId: '',
     hwinfoSensorLabel: '',
+    importedImage: null,
   };
 }
 
@@ -72,18 +87,32 @@ export function cloneGaugeInstance(src: GaugeInstance): GaugeInstance {
 // a gauge with `undefined` where code expects a string (e.g. .trim() in
 // lib/infopanel.ts) — same version bucket (SENSOR_PANEL_FILE_VERSION) just
 // gained a new optional-in-practice field rather than a real breaking change.
-export function normalizeGauge(gauge: Partial<Omit<GaugeInstance, 'opts'>> & { opts?: Partial<DrawOptions> }): GaugeInstance {
-  const mode = gauge.opts?.mode ?? 'bar';
+export function normalizeGauge(gauge: Partial<Omit<GaugeInstance, 'opts'>> & {
+  opts?: Partial<DrawOptions>;
+  importedText?: ImportedText | null;
+}): GaugeInstance {
+  const legacyText = gauge.importedText ?? null;
+  let mode = gauge.opts?.mode ?? 'bar';
+  if (legacyText && (mode === 'container' || mode === 'bar')) mode = 'text';
+  if (gauge.importedImage && mode === 'container') mode = 'image';
   const defaults = defaultDrawOptions(mode);
   const incoming: Partial<DrawOptions> = gauge.opts ?? {};
   const size = defaultSizeForMode(mode);
   const opts: DrawOptions = {
     ...defaults,
     ...incoming,
+    mode,
     containerCorners: Array.isArray(incoming.containerCorners)
       ? [...incoming.containerCorners]
       : [...defaults.containerCorners],
     themeColors: incoming.themeColors ?? defaults.themeColors,
+    textContent: incoming.textContent ?? legacyText?.text ?? defaults.textContent,
+    textFont: incoming.textFont ?? legacyText?.font ?? defaults.textFont,
+    textFontSize: incoming.textFontSize ?? legacyText?.fontSize ?? defaults.textFontSize,
+    textBold: incoming.textBold ?? legacyText?.bold ?? defaults.textBold,
+    textItalic: incoming.textItalic ?? legacyText?.italic ?? defaults.textItalic,
+    textColor: incoming.textColor ?? legacyText?.color ?? defaults.textColor,
+    textAlign: incoming.textAlign ?? legacyText?.align ?? defaults.textAlign,
   };
   return {
     id: gauge.id || makeGaugeId(),
@@ -97,6 +126,7 @@ export function normalizeGauge(gauge: Partial<Omit<GaugeInstance, 'opts'>> & { o
     opts,
     aidaSensorId: gauge.aidaSensorId ?? '',
     hwinfoSensorLabel: gauge.hwinfoSensorLabel ?? '',
+    importedImage: sanitizeImageSrc(gauge.importedImage ?? null),
   };
 }
 

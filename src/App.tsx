@@ -4,7 +4,8 @@ import { cloneGaugeInstance, createGaugeInstance, defaultPanelConfig, remapTheme
 import type { BackgroundOptions } from './lib/backgroundRender';
 import type { DrawOptions, GaugeMode, ThemesMap } from './lib/gaugeRender';
 import { DEFAULT_THEMES, computeGaugeOuterRadius, solveRingBoxForOuterRadius } from './lib/gaugeRender';
-import { clearAutosave, downloadPanelFile, loadAutosave, parsePanelFile, saveAutosave } from './lib/file';
+import { clearAutosave, downloadPanelFile, loadAutosave, saveAutosave } from './lib/file';
+import { importDesignFile } from './lib/importBundle';
 import { fitGaugeToContent } from './lib/gaugeFit';
 import { timestamp } from './lib/compose';
 import { BackgroundPanel } from './components/BackgroundPanel';
@@ -246,10 +247,9 @@ export default function App() {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
+    void (async () => {
       try {
-        const data = parsePanelFile(String(reader.result));
+        const data = await importDesignFile(file);
         replace({
           panel: data.panel,
           gauges: data.gauges,
@@ -260,8 +260,7 @@ export default function App() {
       } catch (err) {
         window.alert(err instanceof Error ? err.message : 'Failed to open file.');
       }
-    };
-    reader.readAsText(file);
+    })();
   }, [replace]);
 
   const updateBackground = useCallback((patch: Partial<BackgroundOptions>) => {
@@ -283,7 +282,7 @@ export default function App() {
     setGauges(gs => gs.map(g => g.id === id ? { ...g, opts: { ...g.opts, ...patch } } : g));
   }, []);
 
-  const updateGaugeMeta = useCallback((id: string, patch: Partial<Pick<GaugeInstance, 'name' | 'x' | 'y' | 'width' | 'height' | 'previewValue' | 'themeKey' | 'aidaSensorId' | 'hwinfoSensorLabel'>>) => {
+  const updateGaugeMeta = useCallback((id: string, patch: Partial<Pick<GaugeInstance, 'name' | 'x' | 'y' | 'width' | 'height' | 'previewValue' | 'themeKey' | 'aidaSensorId' | 'hwinfoSensorLabel' | 'importedImage'>>) => {
     setGauges(gs => gs.map(g => g.id === id ? { ...g, ...patch } : g));
   }, []);
 
@@ -347,7 +346,7 @@ export default function App() {
           </span>
         )}
         <div className="ml-auto flex gap-2">
-          <input ref={fileInputRef} type="file" accept=".sensorpaneldesign,application/json"
+          <input ref={fileInputRef} type="file" accept=".sensorpaneldesign,.spzip,.infopanel,application/json,application/zip"
             className="hidden" onChange={handleFileSelected} />
           <button type="button" onClick={undo} disabled={!canUndo}
             className="px-3 py-1.5 text-[11px] border border-border rounded hover:bg-secondary transition-colors cursor-pointer text-foreground disabled:opacity-40 disabled:pointer-events-none"
@@ -359,7 +358,7 @@ export default function App() {
           >Redo</button>
           <button type="button" onClick={handleOpenClick}
             className="px-3 py-1.5 text-[11px] border border-border rounded hover:bg-secondary transition-colors cursor-pointer text-foreground"
-            title="Open a .sensorpaneldesign project file"
+            title="Open a .sensorpaneldesign project, AIDA64 .spzip, or InfoPanel .infopanel"
           >Open project…</button>
           <button type="button" onClick={handleSave}
             className="px-3 py-1.5 text-[11px] bg-primary text-primary-foreground rounded hover:opacity-90 transition-opacity cursor-pointer font-medium"
@@ -368,7 +367,7 @@ export default function App() {
         </div>
       </div>
 
-      <div className="grid gap-4 flex-1 min-h-0" style={{ gridTemplateColumns: '280px 1fr 300px' }}>
+      <div className="grid gap-4 flex-1 min-h-0 min-w-0" style={{ gridTemplateColumns: '280px minmax(0, 1fr) 300px' }}>
         <div className="bg-card border border-border rounded-lg p-4 overflow-y-auto min-h-0" style={{ scrollbarWidth: 'thin' }}>
           <BackgroundPanel
             width={panel.width}
@@ -379,8 +378,8 @@ export default function App() {
           />
         </div>
 
-        <div className="flex flex-col gap-3 min-h-0">
-          <div className="bg-card border border-border rounded-lg p-5 flex-1 min-h-0 flex">
+        <div className="flex flex-col gap-3 min-h-0 min-w-0">
+          <div className="bg-card border border-border rounded-lg p-5 flex-1 min-h-0 min-w-0 flex">
             <CanvasWorkspace
               panel={panel}
               gauges={gauges}

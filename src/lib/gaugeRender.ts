@@ -1,6 +1,7 @@
 // Ported from Sensor Gauge Image Creator's src/app/App.tsx. Pure canvas
 // drawing logic — no React dependency — so the same drawOn() call renders
 // both the live preview and every exported frame.
+import { drawImportedText } from './importedText';
 
 export type ThemeColors = {
   zone: [string, string, string];
@@ -29,7 +30,24 @@ export const DEFAULT_THEMES: ThemesMap = {
   synthwave:  { zone: ["#03edf9", "#ff7edb", "#f97e72"], mono: ["#ff9df7", "#ff7edb", "#b34fa0"], solid: "#ff7edb" },
 };
 
-export type GaugeMode = "bar" | "circ" | "needle" | "container";
+export type GaugeMode = "bar" | "circ" | "needle" | "container" | "text" | "image";
+
+export const GAUGE_MODE_LABELS: Record<GaugeMode, string> = {
+  bar: "Bar",
+  circ: "Circular",
+  needle: "Needle",
+  container: "Container",
+  text: "Label",
+  image: "Image",
+};
+
+export function isSensorGaugeMode(mode: GaugeMode): boolean {
+  return mode === "bar" || mode === "circ" || mode === "needle";
+}
+
+export function isStaticGaugeMode(mode: GaugeMode): boolean {
+  return !isSensorGaugeMode(mode);
+}
 export type ColorMode = "zone" | "solid" | "mono";
 export type LabelPos = "top" | "bottom" | "left" | "right" | "middle";
 export type ContainerShape = "frame" | "corners" | "line" | "circle";
@@ -341,12 +359,19 @@ export interface DrawOptions {
   containerArmLength: number;
   containerCorners: ContainerCorner[];
   containerOrientation: "horizontal" | "vertical";
+  textContent: string;
+  textFont: string;
+  textFontSize: number;
+  textBold: boolean;
+  textItalic: boolean;
+  textColor: string;
+  textAlign: "left" | "center" | "right";
 }
 
 export function defaultDrawOptions(mode: GaugeMode = "bar"): DrawOptions {
   return {
     mode,
-    nSegs: mode === "needle" ? 0 : 10,
+    nSegs: mode === "needle" || mode === "text" || mode === "image" ? 0 : 10,
     barStyle: "flat",
     sw: 16,
     gap: 3,
@@ -398,6 +423,13 @@ export function defaultDrawOptions(mode: GaugeMode = "bar"): DrawOptions {
     containerArmLength: 60,
     containerCorners: ["tl", "tr", "bl", "br"],
     containerOrientation: "horizontal",
+    textContent: "Label",
+    textFont: "Segoe UI",
+    textFontSize: 20,
+    textBold: false,
+    textItalic: false,
+    textColor: "#ffffff",
+    textAlign: "left",
   };
 }
 
@@ -406,6 +438,8 @@ export function defaultDrawOptions(mode: GaugeMode = "bar"): DrawOptions {
 export function defaultSizeForMode(mode: GaugeMode): { width: number; height: number } {
   if (mode === "bar") return { width: 240, height: 60 };
   if (mode === "container") return { width: 320, height: 220 };
+  if (mode === "text") return { width: 180, height: 32 };
+  if (mode === "image") return { width: 160, height: 160 };
   return { width: 160, height: 160 };
 }
 
@@ -760,6 +794,21 @@ export function drawOn(canvas: HTMLCanvasElement, onCount: number, opts: DrawOpt
 
   if (mode === "container") {
     drawContainerGauge(ctx, W, H, opts);
+    return;
+  }
+  if (mode === "text") {
+    drawImportedText(ctx, {
+      text: opts.textContent,
+      font: opts.textFont,
+      fontSize: opts.textFontSize,
+      bold: opts.textBold,
+      italic: opts.textItalic,
+      color: opts.textColor,
+      align: opts.textAlign,
+    }, canvas.width, canvas.height);
+    return;
+  }
+  if (mode === "image") {
     return;
   }
 

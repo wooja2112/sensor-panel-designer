@@ -8,7 +8,9 @@
 //     "*.infopanel", and files ending in it go through
 //     SharedModel.Instance.ImportProfile — confirming the extension.
 //   - Models/SharedModel.cs (ExportProfile/ImportProfile): the zip holds
-//     exactly Profile.xml + DisplayItems.xml + assets/*; imported assets are
+//     exactly Profile.xml + DisplayItems.xml + assets/* (a root
+//     design.sensorpaneldesign sidecar is ignored on their import, and is
+//     how this app's Open round-trips our own .infopanel files); imported assets are
 //     extracted flat into assets/{newProfileGuid}/{fileName} and referenced
 //     back via ImageDisplayItem.FilePath + RelativePath=true.
 //   - Models/Profile.cs, DisplayItem.cs, GaugeDisplayItem.cs,
@@ -51,12 +53,13 @@
 // either, for the same reason — it's folded into the item's own <Name> as a
 // reminder of which sensor to pick, nothing more.
 import { renderBackground } from './backgroundRender';
-import { drawOn, gaugeSensorRange } from './gaugeRender';
+import { gaugeSensorRange, isStaticGaugeMode } from './gaugeRender';
 import type { ThemesMap } from './gaugeRender';
 import type { GaugeInstance, PanelConfig } from '../types';
-import { resolveDrawOptions } from '../types';
-import { loadImage } from './imageCache';
+import { loadImage, preloadImages } from './imageCache';
 import { JSZip } from './zip';
+import { designImageSrcs, renderGaugeCanvas } from './compose';
+import { DESIGN_SIDECAR_NAME, serializePanelFile } from './file';
 
 function slugify(name: string, fallback: string): string {
   const s = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
@@ -76,11 +79,7 @@ async function canvasToPngBlob(canvas: HTMLCanvasElement): Promise<Blob> {
 }
 
 function renderGauge(gauge: GaugeInstance, themes: ThemesMap, onCount: number): HTMLCanvasElement {
-  const canvas = document.createElement('canvas');
-  canvas.width = Math.max(1, Math.round(gauge.width));
-  canvas.height = Math.max(1, Math.round(gauge.height));
-  drawOn(canvas, onCount, resolveDrawOptions(gauge, themes));
-  return canvas;
+  return renderGaugeCanvas(gauge, themes, onCount);
 }
 
 // Always 21 frames at 5%-of-sensor-value steps (0,5,...,100), independent of
@@ -126,6 +125,7 @@ async function buildBundleParts(panel: PanelConfig, gauges: GaugeInstance[], the
   }
 
   onProgress?.('Rendering panel background…');
+  await preloadImages(designImageSrcs(panel, gauges));
   if (panel.background.image) {
     try {
       await loadImage(panel.background.image);
@@ -152,7 +152,7 @@ async function buildBundleParts(panel: PanelConfig, gauges: GaugeInstance[], the
     const slug = slugify(gauge.name, `gauge-${anon++}`);
     const safeName = xmlEscapeText(gauge.name);
 
-    if (gauge.opts.mode === 'container') {
+    if (isStaticGaugeMode(gauge.opts.mode)) {
       onProgress?.(`Rendering "${gauge.name}" (${gaugeIndex}/${gauges.length})…`);
       const canvas = renderGauge(gauge, themes, 0);
       const name = uniqueName(`${slug}.png`);
@@ -231,6 +231,7 @@ export async function downloadInfoPanelBundle(
   const zip = new JSZip();
   zip.file('Profile.xml', profileXml);
   zip.file('DisplayItems.xml', displayItemsXml);
+  zip.file(DESIGN_SIDECAR_NAME, serializePanelFile(panel, gauges, themes));
   // Backslash, not forward slash — see the file-level comment above; this is
   // the one thing InfoPanel's own ImportProfile (at least as of v1.3.1)
   // requires that isn't standard zip convention. createFolders:false also

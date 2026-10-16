@@ -1,10 +1,12 @@
 // Controls for the currently-selected gauge instance, ported from Sensor
 // Gauge Image Creator's App.tsx control panel (originally one big global
 // useState block) — reshaped to operate on a single GaugeInstance via props.
+import { useRef, useState } from 'react';
 import type { GaugeInstance, PanelConfig } from '../types';
 import type { DrawOptions, GaugeMode, ColorMode, LabelPos, ContainerShape, ContainerCorner, ThemesMap } from '../lib/gaugeRender';
-import { defaultSizeForMode } from '../lib/gaugeRender';
+import { defaultSizeForMode, GAUGE_MODE_LABELS, isSensorGaugeMode } from '../lib/gaugeRender';
 import { parseIntegerInput, parseNumberInput } from '../lib/number';
+import { readBackgroundImageFile } from '../lib/imageCache';
 import { CtrlRow, Pill, ColorField, SliderRow } from './ui-primitives';
 
 const SOLID_SWATCHES = ['#2a78d6', '#1baf7a', '#7F77DD', '#D85A30', '#eda100', '#D4537E'];
@@ -28,7 +30,7 @@ export function GaugePanel({
   panel: PanelConfig;
   themes: ThemesMap;
   onChange: (patch: Partial<DrawOptions>) => void;
-  onMeta: (patch: Partial<Pick<GaugeInstance, 'name' | 'x' | 'y' | 'width' | 'height' | 'previewValue' | 'themeKey' | 'aidaSensorId' | 'hwinfoSensorLabel'>>) => void;
+  onMeta: (patch: Partial<Pick<GaugeInstance, 'name' | 'x' | 'y' | 'width' | 'height' | 'previewValue' | 'themeKey' | 'aidaSensorId' | 'hwinfoSensorLabel' | 'importedImage'>>) => void;
   onOpenThemeDesigner: () => void;
   onDelete: () => void;
   onDuplicate: () => void;
@@ -37,6 +39,8 @@ export function GaugePanel({
   const opts = gauge.opts;
   const mode = opts.mode;
   const isThermo = mode === 'bar' && opts.barStyle === 'thermometer';
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const [imageLoading, setImageLoading] = useState(false);
 
   // Centers the gauge's own X/Y-plus-half-size midpoint on the panel — the
   // same midpoint compose.ts and CanvasWorkspace already treat as "the
@@ -86,6 +90,17 @@ export function GaugePanel({
         <input value={gauge.name} onChange={e => onMeta({ name: e.target.value })} className={textInputClass} />
       </CtrlRow>
 
+      {gauge.importedImage && isSensorGaugeMode(mode) && (
+        <div className="flex flex-col gap-2 rounded border border-border p-2">
+          <p className="text-[10px] text-muted-foreground leading-snug">
+            Imported bitmap from an AIDA64 or InfoPanel bundle. Style controls change the live gauge underneath; convert to use that instead of the bitmap.
+          </p>
+          <button type="button" onClick={() => onMeta({ importedImage: null })}
+            className="w-full px-2 py-1.5 text-[10px] border border-border rounded hover:bg-secondary transition-colors cursor-pointer text-foreground"
+          >Convert to live gauge</button>
+        </div>
+      )}
+
       <CtrlRow label="Position (px)">
         <div className="grid grid-cols-2 gap-2">
           <input type="number" value={gauge.x} onChange={e => onMeta({ x: parseIntegerInput(e.target.value) })} className={numberInputClass} />
@@ -131,20 +146,20 @@ export function GaugePanel({
       {/* Mode tabs */}
       <CtrlRow label="Gauge type">
         <div className="flex border border-border rounded overflow-hidden w-fit flex-wrap">
-          {(['bar', 'circ', 'needle', 'container'] as GaugeMode[]).map(m => (
+          {(['bar', 'circ', 'needle', 'container', 'text', 'image'] as GaugeMode[]).map(m => (
             <button key={m} type="button" onClick={() => switchMode(m)}
               className={[
                 'px-3 py-1 text-[10px] tracking-wider uppercase transition-colors cursor-pointer',
                 mode === m ? 'bg-primary text-primary-foreground font-medium' : 'text-muted-foreground hover:text-foreground',
               ].join(' ')}
             >
-              {m === 'bar' ? 'Bar' : m === 'circ' ? 'Circular' : m === 'needle' ? 'Needle' : 'Container'}
+              {GAUGE_MODE_LABELS[m]}
             </button>
           ))}
         </div>
       </CtrlRow>
 
-      {mode !== 'container' && (
+      {isSensorGaugeMode(mode) && (
         <CtrlRow label="Preview value">
           <div className="flex items-center gap-3">
             <input type="range" min={0} max={100} step={1} value={gauge.previewValue}
@@ -156,7 +171,7 @@ export function GaugePanel({
         </CtrlRow>
       )}
 
-      {mode !== 'container' && (
+      {isSensorGaugeMode(mode) && (
         <CtrlRow label="AIDA64 sensor ID (optional)">
           <input value={gauge.aidaSensorId} onChange={e => onMeta({ aidaSensorId: e.target.value })}
             placeholder="e.g. TCPU, SMASTVOL"
@@ -170,7 +185,7 @@ export function GaugePanel({
         </CtrlRow>
       )}
 
-      {mode !== 'container' && (
+      {isSensorGaugeMode(mode) && (
         <CtrlRow label="HWInfo sensor name (optional)">
           <input value={gauge.hwinfoSensorLabel} onChange={e => onMeta({ hwinfoSensorLabel: e.target.value })}
             placeholder="e.g. CPU Package"
@@ -187,7 +202,7 @@ export function GaugePanel({
       <div className="border-t border-border/50" />
 
       {/* Theme */}
-      {mode !== 'container' && (
+      {isSensorGaugeMode(mode) && (
         <CtrlRow label="Theme">
           <div className="flex gap-1.5">
             <select
@@ -288,8 +303,73 @@ export function GaugePanel({
         </>
       )}
 
+      {mode === 'text' && (
+        <>
+          <CtrlRow label="Text">
+            <input value={opts.textContent} onChange={e => onChange({ textContent: e.target.value })} className={textInputClass} />
+          </CtrlRow>
+          <CtrlRow label="Font">
+            <input value={opts.textFont} onChange={e => onChange({ textFont: e.target.value })} className={textInputClass} />
+          </CtrlRow>
+          <CtrlRow label={`Size — ${opts.textFontSize}px`}>
+            <SliderRow value={opts.textFontSize} min={8} max={128} onChange={v => onChange({ textFontSize: v })} />
+          </CtrlRow>
+          <CtrlRow label="Style">
+            <div className="flex gap-1.5">
+              <Pill active={opts.textBold} onClick={() => onChange({ textBold: !opts.textBold })}>Bold</Pill>
+              <Pill active={opts.textItalic} onClick={() => onChange({ textItalic: !opts.textItalic })}>Italic</Pill>
+            </div>
+          </CtrlRow>
+          <CtrlRow label="Align">
+            <div className="flex gap-1.5">
+              {(['left', 'center', 'right'] as const).map(a => (
+                <Pill key={a} active={opts.textAlign === a} onClick={() => onChange({ textAlign: a })}>
+                  {a.charAt(0).toUpperCase() + a.slice(1)}
+                </Pill>
+              ))}
+            </div>
+          </CtrlRow>
+          <CtrlRow label="Color">
+            <ColorField value={opts.textColor} onChange={v => onChange({ textColor: v })} />
+          </CtrlRow>
+        </>
+      )}
+
+      {mode === 'image' && (
+        <CtrlRow label="Image">
+          <input ref={imageInputRef} type="file" accept="image/*" className="hidden"
+            onChange={async e => {
+              const file = e.target.files?.[0];
+              e.target.value = '';
+              if (!file) return;
+              setImageLoading(true);
+              try {
+                const src = await readBackgroundImageFile(file);
+                onMeta({ importedImage: src });
+              } catch {
+                window.alert('Could not read that image.');
+              }
+              setImageLoading(false);
+            }}
+          />
+          <div className="flex items-center gap-2">
+            {gauge.importedImage && (
+              <img src={gauge.importedImage} alt="" className="w-8 h-8 rounded border border-border object-cover flex-shrink-0" />
+            )}
+            <button type="button" onClick={() => imageInputRef.current?.click()} disabled={imageLoading}
+              className="px-2.5 py-1 text-[11px] border border-border/60 rounded hover:bg-secondary transition-colors disabled:opacity-40 cursor-pointer text-foreground"
+            >{imageLoading ? 'Loading…' : gauge.importedImage ? 'Replace…' : 'Choose image…'}</button>
+            {gauge.importedImage && (
+              <button type="button" onClick={() => onMeta({ importedImage: null })}
+                className="px-2.5 py-1 text-[11px] border border-border/60 rounded hover:bg-secondary transition-colors cursor-pointer text-muted-foreground hover:text-foreground"
+              >Remove</button>
+            )}
+          </div>
+        </CtrlRow>
+      )}
+
       {/* Segments */}
-      {mode !== 'needle' && mode !== 'container' && !isThermo && (
+      {isSensorGaugeMode(mode) && mode !== 'needle' && !isThermo && (
         <CtrlRow label="Segments">
           <div className="flex gap-1.5 flex-wrap">
             <Pill active={opts.nSegs === 0} onClick={() => onChange({ nSegs: 0 })}>Solid</Pill>
@@ -300,7 +380,7 @@ export function GaugePanel({
         </CtrlRow>
       )}
 
-      {mode !== 'needle' && mode !== 'container' && !isThermo && (
+      {isSensorGaugeMode(mode) && mode !== 'needle' && !isThermo && (
         <CtrlRow label="Color mode">
           <div className="flex gap-1.5">
             {(['zone', 'solid', 'mono'] as ColorMode[]).map(m => (
@@ -310,7 +390,7 @@ export function GaugePanel({
         </CtrlRow>
       )}
 
-      {mode !== 'needle' && mode !== 'container' && !isThermo && opts.colorMode === 'solid' && (
+      {isSensorGaugeMode(mode) && mode !== 'needle' && !isThermo && opts.colorMode === 'solid' && (
         <CtrlRow label="Color">
           <div className="flex gap-1.5 flex-wrap items-center">
             {SOLID_SWATCHES.map(c => (
@@ -328,13 +408,13 @@ export function GaugePanel({
         </CtrlRow>
       )}
 
-      {mode !== 'container' && (
+      {isSensorGaugeMode(mode) && (
         <CtrlRow label={mode === 'needle' ? `Zone ring width — ${opts.sw}px` : isThermo ? `Tube width — ${opts.sw}px` : `Stroke / bar height — ${opts.sw}px`}>
           <SliderRow value={opts.sw} min={6} max={72} onChange={v => onChange({ sw: v })} />
         </CtrlRow>
       )}
 
-      {mode !== 'needle' && mode !== 'container' && !isThermo && opts.nSegs > 0 && (
+      {isSensorGaugeMode(mode) && mode !== 'needle' && !isThermo && opts.nSegs > 0 && (
         <CtrlRow label={`Gap between segments — ${opts.gap}px`}>
           <SliderRow value={opts.gap} min={0} max={50} onChange={v => onChange({ gap: v })} />
         </CtrlRow>
@@ -392,7 +472,7 @@ export function GaugePanel({
         </>
       )}
 
-      {mode !== 'needle' && mode !== 'container' && !isThermo && (
+      {isSensorGaugeMode(mode) && mode !== 'needle' && !isThermo && (
         <CtrlRow label={mode === 'circ' ? 'Inner ring 3D effect' : '3D effect'}>
           <div className="flex gap-1.5">
             <Pill active={opts.gauge3D} onClick={() => onChange({ gauge3D: true })}>On</Pill>
@@ -401,7 +481,7 @@ export function GaugePanel({
         </CtrlRow>
       )}
 
-      {((mode !== 'needle' && mode !== 'container' && (opts.gauge3D || (mode === 'circ' && opts.outerRing && opts.outerRing3D)))
+      {((isSensorGaugeMode(mode) && mode !== 'needle' && (opts.gauge3D || (mode === 'circ' && opts.outerRing && opts.outerRing3D)))
         || (mode === 'needle' && opts.needleStyle === 'classic')) && (
         <CtrlRow label={`Light direction — ${opts.lightAngle}°`}>
           <SliderRow value={opts.lightAngle} min={0} max={360} onChange={v => onChange({ lightAngle: v })} />
@@ -548,7 +628,7 @@ export function GaugePanel({
         </>
       )}
 
-      {mode !== 'container' && !isThermo && (
+      {isSensorGaugeMode(mode) && !isThermo && (
         <CtrlRow label="Rotation">
           <div className="flex gap-1.5">
             {[0, 90, 180, 270].map(deg => (
@@ -584,7 +664,7 @@ export function GaugePanel({
         </CtrlRow>
       )}
 
-      {mode !== 'container' && !isThermo && (
+      {isSensorGaugeMode(mode) && !isThermo && (
         <CtrlRow label="Value label">
           <div className="flex gap-1.5">
             <Pill active={opts.showLabel} onClick={() => onChange({ showLabel: true })}>On</Pill>
@@ -593,7 +673,7 @@ export function GaugePanel({
         </CtrlRow>
       )}
 
-      {mode !== 'container' && !isThermo && opts.showLabel && (
+      {isSensorGaugeMode(mode) && !isThermo && opts.showLabel && (
         <CtrlRow label="Label position">
           <div className="flex gap-1.5 flex-wrap">
             {(['top', 'bottom', 'left', 'right'] as LabelPos[]).map(p => (
@@ -606,7 +686,7 @@ export function GaugePanel({
         </CtrlRow>
       )}
 
-      {mode !== 'container' && !isThermo && opts.showLabel && opts.labelPos !== 'middle' && (
+      {isSensorGaugeMode(mode) && !isThermo && opts.showLabel && opts.labelPos !== 'middle' && (
         <CtrlRow label={`Label offset — ${opts.labelPad}px`}>
           <SliderRow value={opts.labelPad} min={0} max={60} onChange={v => onChange({ labelPad: v })} />
         </CtrlRow>

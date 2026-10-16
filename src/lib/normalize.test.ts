@@ -34,7 +34,23 @@ describe('normalizeGauge', () => {
     expect(g.opts.barStyle).toBe('flat');
     expect(g.aidaSensorId).toBe('');
     expect(g.hwinfoSensorLabel).toBe('');
+    expect(g.importedImage).toBeNull();
+    expect(g.opts.textContent).toBe('Label');
     expect(() => g.opts.dialTitle.split('\n')).not.toThrow();
+  });
+
+  it('promotes a legacy importedText container to text mode', () => {
+    const g = normalizeGauge({
+      name: 'UTILITIZATION',
+      opts: { mode: 'container' },
+      importedText: {
+        text: '68%', font: 'Segoe UI', fontSize: 18, bold: true, italic: false, color: '#ffffff', align: 'center',
+      },
+    });
+    expect(g.opts.mode).toBe('text');
+    expect(g.opts.textContent).toBe('68%');
+    expect(g.opts.textBold).toBe(true);
+    expect(g.opts.textAlign).toBe('center');
   });
 });
 

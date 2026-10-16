@@ -7,14 +7,33 @@ import { barCanvasIsSwapped, drawOn, previewValueToOnCount } from './gaugeRender
 import type { ThemesMap } from './gaugeRender';
 import type { GaugeInstance } from '../types';
 import { resolveDrawOptions } from '../types';
+import { getCachedImage } from './imageCache';
+import { measureImportedText } from './importedText';
 
 const ALPHA_THRESHOLD = 8; // ignores near-invisible antialiasing fringe
 
 export function fitGaugeToContent(gauge: GaugeInstance, themes: ThemesMap): Pick<GaugeInstance, 'x' | 'y' | 'width' | 'height'> | null {
+  const opts = resolveDrawOptions(gauge, themes);
+  if (gauge.importedImage) {
+    const img = getCachedImage(gauge.importedImage);
+    if (!img) return null;
+    return { x: gauge.x, y: gauge.y, width: img.width, height: img.height };
+  }
+  if (opts.mode === 'text') {
+    const box = measureImportedText({
+      text: opts.textContent,
+      font: opts.textFont,
+      fontSize: opts.textFontSize,
+      bold: opts.textBold,
+      italic: opts.textItalic,
+      color: opts.textColor,
+      align: opts.textAlign,
+    });
+    return { x: gauge.x, y: gauge.y, width: box.width, height: box.height };
+  }
   const canvas = document.createElement('canvas');
   canvas.width = Math.max(1, Math.round(gauge.width));
   canvas.height = Math.max(1, Math.round(gauge.height));
-  const opts = resolveDrawOptions(gauge, themes);
   const onCount = previewValueToOnCount(gauge.previewValue, opts.nSegs);
   // A solid bgColor would make the whole box "content" — force transparent
   // for this measurement pass only; the gauge's own bgColor is untouched.

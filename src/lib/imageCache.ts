@@ -22,6 +22,10 @@ export function getCachedImage(src: string): HTMLImageElement | undefined {
   return cache.get(src);
 }
 
+export async function preloadImages(srcs: string[]): Promise<void> {
+  await Promise.all(srcs.map(src => loadImage(src).catch(() => undefined)));
+}
+
 export function loadImage(src: string): Promise<HTMLImageElement> {
   if (!isAllowedImageSrc(src)) {
     return Promise.reject(new Error('Image source is not an inlined data URL.'));

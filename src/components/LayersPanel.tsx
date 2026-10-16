@@ -6,6 +6,8 @@ const ADD_OPTIONS: { mode: GaugeMode; label: string }[] = [
   { mode: 'circ', label: '+ Circular' },
   { mode: 'needle', label: '+ Needle' },
   { mode: 'container', label: '+ Container' },
+  { mode: 'text', label: '+ Label' },
+  { mode: 'image', label: '+ Image' },
 ];
 
 export function LayersPanel({

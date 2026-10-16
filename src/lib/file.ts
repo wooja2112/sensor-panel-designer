@@ -8,6 +8,11 @@ import type { ThemesMap } from './gaugeRender';
 
 export const SENSOR_PANEL_FILE_VERSION = 1;
 
+// Extra zip entry written next to panel.sp2 / Profile.xml. AIDA64 and
+// InfoPanel ignore unknown root files, so our own .spzip/.infopanel round-trip
+// losslessly while still remaining valid third-party bundles.
+export const DESIGN_SIDECAR_NAME = 'design.sensorpaneldesign';
+
 export interface SensorPanelFile {
   version: number;
   panel: PanelConfig;

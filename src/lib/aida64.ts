@@ -16,6 +16,8 @@
 //
 // The file itself is UTF-16LE with a BOM, CRLF between items, no XML
 // escaping and no item count — a reader just consumes items until EOF.
+// Extra zip entries (including design.sensorpaneldesign) are ignored by
+// AIDA64, which is how our own exports round-trip through Open.
 //
 // The one thing this cannot fill in: [GAUGE] items key off a real hardware
 // sensor mnemonic (TCPU, SMASTVOL, SCPUUTI, ...) read live from the machine
@@ -25,12 +27,13 @@
 // aidaSensorId falls back to SCPUUTI ("CPU Utilization", confirmed from the
 // same official template, a natural 0-100% metric) and is always enabled.
 import { renderBackground } from './backgroundRender';
-import { drawOn, gaugeSensorRange } from './gaugeRender';
+import { gaugeSensorRange, isStaticGaugeMode } from './gaugeRender';
 import type { ThemesMap } from './gaugeRender';
 import type { GaugeInstance, PanelConfig } from '../types';
-import { loadImage } from './imageCache';
-import { resolveDrawOptions } from '../types';
+import { loadImage, preloadImages } from './imageCache';
 import { JSZip } from './zip';
+import { designImageSrcs, renderGaugeCanvas } from './compose';
+import { DESIGN_SIDECAR_NAME, serializePanelFile } from './file';
 
 const AIDA_STATE_COUNT = 16;
 const DEFAULT_SENSOR_ID = 'SCPUUTI'; // AIDA64's real mnemonic for "CPU Utilization"
@@ -67,11 +70,7 @@ async function canvasToPngBlob(canvas: HTMLCanvasElement): Promise<Blob> {
 }
 
 function renderGauge(gauge: GaugeInstance, themes: ThemesMap, onCount: number): HTMLCanvasElement {
-  const canvas = document.createElement('canvas');
-  canvas.width = Math.max(1, Math.round(gauge.width));
-  canvas.height = Math.max(1, Math.round(gauge.height));
-  drawOn(canvas, onCount, resolveDrawOptions(gauge, themes));
-  return canvas;
+  return renderGaugeCanvas(gauge, themes, onCount);
 }
 
 // AIDA64 always divides a Custom gauge's MINVAL..MAXVAL span into exactly
@@ -105,6 +104,7 @@ async function buildBundleParts(panel: PanelConfig, gauges: GaugeInstance[], the
   }
 
   onProgress?.('Rendering panel background…');
+  await preloadImages(designImageSrcs(panel, gauges));
   if (panel.background.image) {
     try {
       await loadImage(panel.background.image);
@@ -126,7 +126,7 @@ async function buildBundleParts(panel: PanelConfig, gauges: GaugeInstance[], the
     gaugeIndex++;
     const slug = slugify(gauge.name, `gauge-${anon++}`);
 
-    if (gauge.opts.mode === 'container') {
+    if (isStaticGaugeMode(gauge.opts.mode)) {
       onProgress?.(`Rendering "${gauge.name}" (${gaugeIndex}/${gauges.length})…`);
       const canvas = renderGauge(gauge, themes, 0);
       const name = uniqueName(`${slug}.png`);
@@ -206,6 +206,7 @@ export async function downloadAida64Bundle(
   onProgress?.(`Packaging .spzip (${files.length + 1} files)…`);
   const zip = new JSZip();
   zip.file('panel.sp2', toUtf16LEBytes(defText));
+  zip.file(DESIGN_SIDECAR_NAME, serializePanelFile(panel, gauges, themes));
   for (const f of files) zip.file(f.name, f.blob);
 
   // PNGs are already compressed — DEFLATE-recompressing them buys almost

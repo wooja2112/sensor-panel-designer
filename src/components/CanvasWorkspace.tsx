@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import type { PanelConfig, GaugeInstance } from '../types';
 import type { ThemesMap } from '../lib/gaugeRender';
-import { renderPanel } from '../lib/compose';
+import { designImageSrcs, renderPanel } from '../lib/compose';
 import { barCanvasIsSwapped } from '../lib/gaugeRender';
-import { getCachedImage, loadImage } from '../lib/imageCache';
+import { getCachedImage, preloadImages } from '../lib/imageCache';
 
 type Zoom = number | 'fit';
 
@@ -91,15 +91,15 @@ export function CanvasWorkspace({
     if (!canvas) return;
     renderPanel(canvas, panel, gauges, themes);
 
-    // The background image may have arrived via autosave/project load,
-    // where it isn't decoded yet on this first paint — renderBackground
-    // silently skips it in that case, so re-render once decoding finishes.
-    const src = panel.background.image;
-    if (src && !getCachedImage(src)) {
+    // Background / imported-gauge images may have arrived via autosave or
+    // Open, where they aren't decoded yet on this first paint — those
+    // draws skip missing bitmaps, so re-render once decoding finishes.
+    const pending = designImageSrcs(panel, gauges).filter(src => !getCachedImage(src));
+    if (pending.length > 0) {
       let cancelled = false;
-      loadImage(src).then(() => {
+      preloadImages(pending).then(() => {
         if (!cancelled) renderPanel(canvas, panel, gauges, themes);
-      }).catch(() => {});
+      });
       return () => { cancelled = true; };
     }
   }, [panel, gauges, themes]);
@@ -141,14 +141,15 @@ export function CanvasWorkspace({
   }, [onMoveGauges, onResizeGauge]);
 
   return (
-    <div className="flex flex-col gap-3 flex-1 min-h-0">
-      <div className="flex items-center justify-between">
+    <div className="flex flex-col gap-3 flex-1 min-h-0 min-w-0">
+      <div className="flex items-center justify-between gap-2 flex-shrink-0">
         <span className="text-[9px] tracking-[0.14em] uppercase font-medium text-muted-foreground">
           {panel.width} × {panel.height}px
         </span>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1 shrink-0">
           {(['fit', 0.25, 0.5, 0.75, 1] as Zoom[]).map(z => (
-            <button key={z} type="button" onClick={() => setZoom(z)}
+            <button key={String(z)} type="button" onClick={() => setZoom(z)}
+              aria-pressed={zoom === z}
               className={[
                 'px-2 py-0.5 text-[9px] rounded border transition-colors cursor-pointer',
                 zoom === z ? 'bg-secondary border-border/60 text-foreground' : 'border-border/30 text-muted-foreground hover:text-foreground hover:border-border/60',
@@ -162,8 +163,17 @@ export function CanvasWorkspace({
 
       <div
         ref={outerRef}
-        className="flex-1 min-h-0 flex items-center justify-center bg-background/40 rounded border border-border/40 overflow-auto"
+        className="flex-1 min-h-0 min-w-0 bg-background/40 rounded border border-border/40 overflow-auto"
       >
+        <div
+          className="flex items-center justify-center"
+          style={{
+            minWidth: '100%',
+            minHeight: '100%',
+            width: Math.max(stageWidth, available.width),
+            height: Math.max(stageHeight, available.height),
+          }}
+        >
         <div
           className="relative flex-shrink-0"
           style={{ width: stageWidth, height: stageHeight }}
@@ -253,6 +263,7 @@ export function CanvasWorkspace({
               </div>
             );
           })}
+        </div>
         </div>
       </div>
     </div>

@@ -2,11 +2,11 @@ import { useState } from 'react';
 import type { GaugeInstance, PanelConfig } from '../types';
 import { resolveDrawOptions } from '../types';
 import type { ThemesMap } from '../lib/gaugeRender';
-import { drawOn, makeStamp } from '../lib/gaugeRender';
-import { renderPanel, timestamp, downloadCanvasPng } from '../lib/compose';
+import { isStaticGaugeMode, makeStamp } from '../lib/gaugeRender';
+import { designImageSrcs, downloadCanvasPng, renderGaugeCanvas, renderPanel, timestamp } from '../lib/compose';
 import { downloadAida64Bundle } from '../lib/aida64';
 import { downloadInfoPanelBundle } from '../lib/infopanel';
-import { loadImage } from '../lib/imageCache';
+import { preloadImages } from '../lib/imageCache';
 import { JSZip } from '../lib/zip';
 
 interface FrameData {
@@ -30,13 +30,7 @@ export function ExportBar({
   const [exportingInfoPanel, setExportingInfoPanel] = useState(false);
 
   const exportPanel = async () => {
-    if (panel.background.image) {
-      try {
-        await loadImage(panel.background.image);
-      } catch {
-        // Fall through and export without the image rather than blocking export.
-      }
-    }
+    await preloadImages(designImageSrcs(panel, gauges));
     const canvas = document.createElement('canvas');
     renderPanel(canvas, panel, gauges, themes);
     downloadCanvasPng(canvas, `panel-${panel.width}x${panel.height}-${timestamp()}.png`);
@@ -80,14 +74,13 @@ export function ExportBar({
   const downloadGaugePng = () => {
     if (!selectedGauge) return;
     const opts = resolveDrawOptions(selectedGauge, themes);
-    const canvas = document.createElement('canvas');
-    canvas.width = selectedGauge.width;
-    canvas.height = selectedGauge.height;
     const onCount = opts.nSegs === 0 ? selectedGauge.previewValue : Math.round((selectedGauge.previewValue / 100) * opts.nSegs);
-    // drawOn may resize the canvas (swapping width/height) for a
-    // 90°/270°-rotated bar gauge, so the filename reflects its actual size.
-    drawOn(canvas, onCount, opts);
-    downloadCanvasPng(canvas, `${baseName}-${canvas.width}x${canvas.height}-${timestamp()}.png`);
+    void preloadImages(designImageSrcs(panel, [selectedGauge])).then(() => {
+      // drawOn may resize the canvas (swapping width/height) for a
+      // 90°/270°-rotated bar gauge, so the filename reflects its actual size.
+      const canvas = renderGaugeCanvas(selectedGauge, themes, onCount);
+      downloadCanvasPng(canvas, `${baseName}-${canvas.width}x${canvas.height}-${timestamp()}.png`);
+    });
   };
 
   const generateFrames = () => {
@@ -99,7 +92,7 @@ export function ExportBar({
     // consumers can update the displayed image every 5% of live sensor
     // value rather than only at whatever coarser step the gauge's visual
     // segment count would otherwise imply.
-    const onCounts = opts.mode === 'container'
+    const onCounts = isStaticGaugeMode(opts.mode)
       ? [0]
       : Array.from({ length: 21 }, (_, i) => {
         const pct = i * 5;
@@ -114,10 +107,7 @@ export function ExportBar({
     let renderedWidth = selectedGauge.width;
     let renderedHeight = selectedGauge.height;
     for (let f = 0; f < onCounts.length; f++) {
-      const canvas = document.createElement('canvas');
-      canvas.width = selectedGauge.width;
-      canvas.height = selectedGauge.height;
-      drawOn(canvas, onCounts[f], opts);
+      const canvas = renderGaugeCanvas(selectedGauge, themes, onCounts[f]);
       if (f === 0) {
         renderedWidth = canvas.width;
         renderedHeight = canvas.height;
