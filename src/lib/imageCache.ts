@@ -7,11 +7,25 @@
 const cache = new Map<string, HTMLImageElement>();
 const inFlight = new Map<string, Promise<HTMLImageElement>>();
 
+// Project files / autosaves should only carry inlined images. A remote URL
+// in `background.image` would fetch on load (privacy) and could be huge.
+export function isAllowedImageSrc(src: string): boolean {
+  return src.startsWith('data:') || src.startsWith('blob:');
+}
+
+export function sanitizeImageSrc(src: string | null | undefined): string | null {
+  if (typeof src !== 'string' || !src || !isAllowedImageSrc(src)) return null;
+  return src;
+}
+
 export function getCachedImage(src: string): HTMLImageElement | undefined {
   return cache.get(src);
 }
 
 export function loadImage(src: string): Promise<HTMLImageElement> {
+  if (!isAllowedImageSrc(src)) {
+    return Promise.reject(new Error('Image source is not an inlined data URL.'));
+  }
   const cached = cache.get(src);
   if (cached) return Promise.resolve(cached);
   const pending = inFlight.get(src);

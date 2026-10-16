@@ -3,7 +3,7 @@
 // container glow, ...) — found by rendering the gauge alone and scanning
 // its alpha channel, so it works for every mode without needing to know
 // each one's own layout math.
-import { drawOn, previewValueToOnCount } from './gaugeRender';
+import { barCanvasIsSwapped, drawOn, previewValueToOnCount } from './gaugeRender';
 import type { ThemesMap } from './gaugeRender';
 import type { GaugeInstance } from '../types';
 import { resolveDrawOptions } from '../types';
@@ -24,7 +24,7 @@ export function fitGaugeToContent(gauge: GaugeInstance, themes: ThemesMap): Pick
   // bar gauge — see gaugeRender.ts — so read the actual post-draw size
   // rather than assuming it still matches gauge.width/height.
   const cw = canvas.width, ch = canvas.height;
-  const swapped = cw !== Math.max(1, Math.round(gauge.width)) || ch !== Math.max(1, Math.round(gauge.height));
+  const swapped = barCanvasIsSwapped(opts);
 
   const ctx = canvas.getContext('2d')!;
   const data = ctx.getImageData(0, 0, cw, ch).data;

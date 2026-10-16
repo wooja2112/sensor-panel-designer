@@ -226,21 +226,19 @@ export default function App() {
   }, []);
 
   const duplicateGauge = useCallback((id: string) => {
-    setGauges(gs => {
-      const src = gs.find(g => g.id === id);
-      if (!src) return gs;
-      const clone: GaugeInstance = {
-        ...src,
-        id: `${src.id}-copy-${Date.now().toString(36)}`,
-        name: `${src.name} copy`,
-        x: src.x + 16,
-        y: src.y + 16,
-        opts: { ...src.opts, containerCorners: [...src.opts.containerCorners] },
-      };
-      setSelectedIds([clone.id]);
-      return [...gs, clone];
-    });
-  }, []);
+    const src = gauges.find(g => g.id === id);
+    if (!src) return;
+    const clone: GaugeInstance = {
+      ...src,
+      id: `${src.id}-copy-${Date.now().toString(36)}`,
+      name: `${src.name} copy`,
+      x: src.x + 16,
+      y: src.y + 16,
+      opts: { ...src.opts, containerCorners: [...src.opts.containerCorners] },
+    };
+    setGauges(gs => [...gs, clone]);
+    setSelectedIds([clone.id]);
+  }, [gauges]);
 
   const reorderGauge = useCallback((id: string, dir: -1 | 1) => {
     setGauges(gs => {

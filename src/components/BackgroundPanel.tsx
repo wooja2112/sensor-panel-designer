@@ -9,6 +9,7 @@ import {
 } from '../lib/backgroundRender';
 import type { BackgroundOptions, PatternKey, BackgroundShape, BackgroundImageFit } from '../lib/backgroundRender';
 import { readBackgroundImageFile } from '../lib/imageCache';
+import { parseIntegerInput } from '../lib/number';
 import { CtrlRow, Pill, ColorField, SliderRow } from './ui-primitives';
 
 const PATTERN_GROUPS: { label: string; options: { value: PatternKey; label: string }[] }[] = [
@@ -77,12 +78,12 @@ export function BackgroundPanel({
       <CtrlRow label="Panel size (px)">
         <div className="flex items-center gap-2">
           <input type="number" value={width} min={1} step={1}
-            onChange={e => onSizeChange({ width: Math.max(1, +e.target.value || 1) })}
+            onChange={e => onSizeChange({ width: Math.max(1, parseIntegerInput(e.target.value, 1)) })}
             className={numberInputClass}
           />
           <span className="text-xs text-muted-foreground">×</span>
           <input type="number" value={height} min={1} step={1}
-            onChange={e => onSizeChange({ height: Math.max(1, +e.target.value || 1) })}
+            onChange={e => onSizeChange({ height: Math.max(1, parseIntegerInput(e.target.value, 1)) })}
             className={numberInputClass}
           />
         </div>

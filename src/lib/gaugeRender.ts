@@ -93,14 +93,17 @@ function apply3DBarShading(
   shade.addColorStop(0.5, "rgba(0,0,0,0.05)");
   shade.addColorStop(1, "rgba(0,0,0,0.3)");
   ctx.fillStyle = shade;
-  ctx.fillRect(x, y, w, h);
+  // Pad past the axis-aligned box so a slanted clip (parallelogram) is fully
+  // shaded, not just the rectangle that sits inside it.
+  const pad = Math.max(w, h);
+  ctx.fillRect(x - pad, y - pad, w + pad * 2, h + pad * 2);
 
   // Glossy highlight band on the side facing the light
   const cap = ctx.createLinearGradient(bx, by, dx, dy);
   cap.addColorStop(0, "rgba(255,255,255,0.45)");
   cap.addColorStop(0.4, "rgba(255,255,255,0)");
   ctx.fillStyle = cap;
-  ctx.fillRect(x, y, w, h);
+  ctx.fillRect(x - pad, y - pad, w + pad * 2, h + pad * 2);
 
   ctx.restore();
 
@@ -180,7 +183,7 @@ function drawThermometerGauge(
   // above the bulb (rather than at tubeBottom, which runs into the bulb
   // itself) so it doesn't collide with the °F/°C unit labels beside the
   // bulb below it — real thermometers leave the same gap.
-  const tickCount = Math.max(2, opts.thermoTickCount);
+  const tickCount = Math.max(2, opts.thermoTickCount || 2);
   const tickLen = Math.max(4, tubeW * 0.5);
   const fs = Math.max(9, Math.min(tubeW * 0.85, H * 0.045));
   const scaleBottom = bulbCY - bulbR - fs * 0.6;
@@ -406,6 +409,33 @@ export function defaultSizeForMode(mode: GaugeMode): { width: number; height: nu
   return { width: 160, height: 160 };
 }
 
+// drawOn swaps canvas width/height for a 90°/270° bar so the long axis
+// isn't clipped. Thermometers are always drawn upright and must not swap
+// even if a leftover rotation is still stored on the gauge.
+export function barCanvasIsSwapped(opts: DrawOptions): boolean {
+  return opts.mode === "bar"
+    && opts.barStyle !== "thermometer"
+    && (opts.rotation === 90 || opts.rotation === 270);
+}
+
+// Min/max written into AIDA64 / InfoPanel so live sensors line up with
+// classic-dial tick labels and thermometer °C ticks. Other gauges stay 0–100.
+// Thermometers always export °C (HWInfo/AIDA temp sensors are typically C);
+// the default 32–212°F scale is 0–100°C, matching the old hard-coded export.
+export function gaugeSensorRange(opts: DrawOptions): { min: number; max: number } {
+  if (opts.mode === "bar" && opts.barStyle === "thermometer") {
+    const min = Math.round((opts.thermoMinF - 32) * 5 / 9);
+    const max = Math.round((opts.thermoMaxF - 32) * 5 / 9);
+    return min === max ? { min, max: min + 1 } : { min, max };
+  }
+  if (opts.mode === "needle" && opts.needleStyle === "classic") {
+    const min = opts.dialMin;
+    const max = opts.dialMax;
+    return min === max ? { min, max: min + 1 } : { min, max };
+  }
+  return { min: 0, max: 100 };
+}
+
 // Draw text visually centered at (x, y) — uses actual glyph bounds, not EM-box
 function fillTextVCenter(
   ctx: CanvasRenderingContext2D, text: string, x: number, y: number
@@ -493,7 +523,7 @@ function drawZoneRing(
 function drawClassicDialFace(
   ctx: CanvasRenderingContext2D, cx: number, cy: number, faceR: number, opts: DrawOptions
 ) {
-  const titleLines = opts.dialTitle.split("\n").map(s => s.trim()).filter(Boolean).slice(0, 2);
+  const titleLines = (opts.dialTitle ?? "").split("\n").map(s => s.trim()).filter(Boolean).slice(0, 2);
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
 
@@ -718,7 +748,7 @@ export function drawOn(canvas: HTMLCanvasElement, onCount: number, opts: DrawOpt
   // unaffected; only the rotation transform's pivot and the fill/clear
   // extents need to know about the swapped physical canvas size.
   const W = canvas.width, H = canvas.height;
-  const rotated90 = mode === "bar" && (opts.rotation === 90 || opts.rotation === 270);
+  const rotated90 = barCanvasIsSwapped(opts);
   if (rotated90) { canvas.width = H; canvas.height = W; }
   const ctx = canvas.getContext("2d")!;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -781,22 +811,28 @@ export function drawOn(canvas: HTMLCanvasElement, onCount: number, opts: DrawOpt
       // edge (oy + bH) as baseline and its top-right corner (bH tall) as the
       // wedge's tallest point.
       const ascending = opts.barStyle === "ascending";
+      const slanted = opts.barStyle === "slanted";
       const baselineY = oy + bH;
       const minHeightFrac = 0.15;
       const heightAtFrac = (t: number) => bH * (minHeightFrac + t * (1 - minHeightFrac));
+      const solidSkew = bH * 0.35;
       // Fill clip always uses this *full-width* shape (matching the original
       // flat behavior) — fillRect below does the actual left-to-right
       // reveal, so clipping against the full sloped outline naturally
       // truncates it at the fill edge without needing a separate partial
       // wedge path.
       const fullShapePath = () => {
-        if (!ascending) { roundRect(ctx, ox, oy, bW, bH, barR); return; }
-        ctx.beginPath();
-        ctx.moveTo(ox, baselineY);
-        ctx.lineTo(ox + bW, baselineY);
-        ctx.lineTo(ox + bW, baselineY - heightAtFrac(1));
-        ctx.lineTo(ox, baselineY - heightAtFrac(0));
-        ctx.closePath();
+        if (ascending) {
+          ctx.beginPath();
+          ctx.moveTo(ox, baselineY);
+          ctx.lineTo(ox + bW, baselineY);
+          ctx.lineTo(ox + bW, baselineY - heightAtFrac(1));
+          ctx.lineTo(ox, baselineY - heightAtFrac(0));
+          ctx.closePath();
+          return;
+        }
+        if (slanted) { slantPath(ctx, ox, oy, bW, bH, solidSkew); return; }
+        roundRect(ctx, ox, oy, bW, bH, barR);
       };
 
       // Solid bar: track + clipped fill
@@ -825,7 +861,10 @@ export function drawOn(canvas: HTMLCanvasElement, onCount: number, opts: DrawOpt
       // Skipped for the wedge shape: apply3DBarShading clips to a plain
       // rounded rect internally, which would shade outside the wedge's
       // triangular silhouette (e.g. the empty corner above its short end).
-      if (opts.gauge3D && !ascending) apply3DBarShading(ctx, ox, oy, bW, bH, barR, opts.lightAngle);
+      if (opts.gauge3D && !ascending) {
+        apply3DBarShading(ctx, ox, oy, bW, bH, barR, opts.lightAngle,
+          slanted ? () => slantPath(ctx, ox, oy, bW, bH, solidSkew) : undefined);
+      }
     } else {
       const tg = Math.min(gap * (nSegs - 1), bW * 0.9), segW = (bW - tg) / nSegs;
       const segR = Math.min(4, segW / 3);

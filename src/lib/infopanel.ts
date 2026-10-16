@@ -51,7 +51,7 @@
 // either, for the same reason — it's folded into the item's own <Name> as a
 // reminder of which sensor to pick, nothing more.
 import { renderBackground } from './backgroundRender';
-import { drawOn } from './gaugeRender';
+import { drawOn, gaugeSensorRange } from './gaugeRender';
 import type { ThemesMap } from './gaugeRender';
 import type { GaugeInstance, PanelConfig } from '../types';
 import { resolveDrawOptions } from '../types';
@@ -194,10 +194,11 @@ async function buildBundleParts(panel: PanelConfig, gauges: GaugeInstance[], the
     const itemY = Math.round(gauge.y + gauge.height / 2 - renderedHeight / 2);
     const label = gauge.hwinfoSensorLabel.trim();
     const displayName = label ? `${safeName} (HWInfo: ${xmlEscapeText(label)})` : safeName;
+    const range = gaugeSensorRange(gauge.opts);
     items.push(
       `<DisplayItem xsi:type="GaugeDisplayItem"><Name>${displayName}</Name>` +
       `<X>${itemX}</X><Y>${itemY}</Y>` +
-      `<MinValue>0</MinValue><MaxValue>100</MaxValue>` +
+      `<MinValue>${range.min}</MinValue><MaxValue>${range.max}</MaxValue>` +
       `<Width>${renderedWidth}</Width><Height>${renderedHeight}</Height>` +
       `<Images>${imageItems.join('')}</Images></DisplayItem>`,
     );

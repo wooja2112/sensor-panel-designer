@@ -1,7 +1,8 @@
 import type { BackgroundOptions } from './lib/backgroundRender';
 import { defaultBackgroundOptions } from './lib/backgroundRender';
 import type { DrawOptions, GaugeMode, ThemesMap } from './lib/gaugeRender';
-import { defaultDrawOptions, defaultSizeForMode } from './lib/gaugeRender';
+import { DEFAULT_THEMES, defaultDrawOptions, defaultSizeForMode } from './lib/gaugeRender';
+import { sanitizeImageSrc } from './lib/imageCache';
 
 export interface GaugeInstance {
   id: string;
@@ -60,12 +61,53 @@ export function createGaugeInstance(mode: GaugeMode, themeKey: string, x: number
 // a gauge with `undefined` where code expects a string (e.g. .trim() in
 // lib/infopanel.ts) — same version bucket (SENSOR_PANEL_FILE_VERSION) just
 // gained a new optional-in-practice field rather than a real breaking change.
-export function normalizeGauge(gauge: GaugeInstance): GaugeInstance {
+export function normalizeGauge(gauge: Partial<Omit<GaugeInstance, 'opts'>> & { opts?: Partial<DrawOptions> }): GaugeInstance {
+  const mode = gauge.opts?.mode ?? 'bar';
+  const defaults = defaultDrawOptions(mode);
+  const incoming: Partial<DrawOptions> = gauge.opts ?? {};
+  const size = defaultSizeForMode(mode);
+  const opts: DrawOptions = {
+    ...defaults,
+    ...incoming,
+    containerCorners: Array.isArray(incoming.containerCorners)
+      ? [...incoming.containerCorners]
+      : [...defaults.containerCorners],
+    themeColors: incoming.themeColors ?? defaults.themeColors,
+  };
   return {
-    ...gauge,
+    id: gauge.id || makeGaugeId(),
+    name: gauge.name ?? 'Gauge',
+    x: gauge.x ?? 0,
+    y: gauge.y ?? 0,
+    width: Math.max(1, gauge.width ?? size.width),
+    height: Math.max(1, gauge.height ?? size.height),
+    previewValue: gauge.previewValue ?? 68,
+    themeKey: gauge.themeKey ?? 'classic',
+    opts,
     aidaSensorId: gauge.aidaSensorId ?? '',
     hwinfoSensorLabel: gauge.hwinfoSensorLabel ?? '',
   };
+}
+
+export function normalizePanel(panel: Partial<PanelConfig> & { background?: Partial<BackgroundOptions> }): PanelConfig {
+  const defaults = defaultPanelConfig();
+  const background = {
+    ...defaults.background,
+    ...(panel.background ?? {}),
+    image: sanitizeImageSrc(panel.background?.image ?? null),
+  };
+  return {
+    width: Math.max(1, panel.width ?? defaults.width),
+    height: Math.max(1, panel.height ?? defaults.height),
+    background,
+  };
+}
+
+export function normalizeThemes(themes: ThemesMap | undefined | null): ThemesMap {
+  if (!themes || typeof themes !== 'object' || Array.isArray(themes) || Object.keys(themes).length === 0) {
+    return structuredClone(DEFAULT_THEMES);
+  }
+  return themes;
 }
 
 // A gauge instance stores a themeKey (a reference into the shared, editable

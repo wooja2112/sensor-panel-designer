@@ -182,7 +182,7 @@ export function ExportBar({
         )}
         <button type="button" onClick={exportAida64} disabled={exportingAida}
           className="px-3 py-1.5 text-[11px] border border-border rounded hover:bg-secondary transition-colors disabled:opacity-40 cursor-pointer text-foreground"
-          title="Builds a real AIDA64 .spzip bundle: the background plus a 16-state Custom gauge per gauge, ready to Import in AIDA64's SensorPanel manager. Gauges without an AIDA64 sensor ID set are exported disabled until you bind one."
+          title="Builds a real AIDA64 .spzip bundle: the background plus a 16-state Custom gauge per gauge, ready to Import in AIDA64's SensorPanel manager. Gauges without an AIDA64 sensor ID default to CPU Utilization (SCPUUTI) so they stay visible."
         >{exportingAida ? 'Building…' : 'Export to AIDA64'}</button>
         <button type="button" onClick={exportInfoPanel} disabled={exportingInfoPanel}
           className="px-3 py-1.5 text-[11px] border border-border rounded hover:bg-secondary transition-colors disabled:opacity-40 cursor-pointer text-foreground"

@@ -4,6 +4,7 @@
 import type { GaugeInstance, PanelConfig } from '../types';
 import type { DrawOptions, GaugeMode, ColorMode, LabelPos, ContainerShape, ContainerCorner, ThemesMap } from '../lib/gaugeRender';
 import { defaultSizeForMode } from '../lib/gaugeRender';
+import { parseIntegerInput, parseNumberInput } from '../lib/number';
 import { CtrlRow, Pill, ColorField, SliderRow } from './ui-primitives';
 
 const SOLID_SWATCHES = ['#2a78d6', '#1baf7a', '#7F77DD', '#D85A30', '#eda100', '#D4537E'];
@@ -64,9 +65,13 @@ export function GaugePanel({
       width: w, height: h,
       x: Math.round((panel.width - w) / 2), y: Math.round((panel.height - h) / 2),
     });
-    if (style === 'thermometer') recenter(140, 320);
-    else if (opts.barStyle === 'thermometer') recenter(240, 60);
-    onChange({ barStyle: style, nSegs: style === 'thermometer' ? 0 : opts.nSegs });
+    if (style === 'thermometer') {
+      recenter(140, 320);
+      onChange({ barStyle: style, nSegs: 0, rotation: 0 });
+      return;
+    }
+    if (opts.barStyle === 'thermometer') recenter(240, 60);
+    onChange({ barStyle: style, nSegs: opts.nSegs });
   };
 
   const toggleContainerCorner = (c: ContainerCorner) => {
@@ -83,8 +88,8 @@ export function GaugePanel({
 
       <CtrlRow label="Position (px)">
         <div className="grid grid-cols-2 gap-2">
-          <input type="number" value={gauge.x} onChange={e => onMeta({ x: Math.round(+e.target.value || 0) })} className={numberInputClass} />
-          <input type="number" value={gauge.y} onChange={e => onMeta({ y: Math.round(+e.target.value || 0) })} className={numberInputClass} />
+          <input type="number" value={gauge.x} onChange={e => onMeta({ x: parseIntegerInput(e.target.value) })} className={numberInputClass} />
+          <input type="number" value={gauge.y} onChange={e => onMeta({ y: parseIntegerInput(e.target.value) })} className={numberInputClass} />
         </div>
       </CtrlRow>
 
@@ -103,8 +108,8 @@ export function GaugePanel({
 
       <CtrlRow label="Size (px)">
         <div className="grid grid-cols-2 gap-2">
-          <input type="number" min={1} value={gauge.width} onChange={e => onMeta({ width: Math.max(1, Math.round(+e.target.value || 1)) })} className={numberInputClass} />
-          <input type="number" min={1} value={gauge.height} onChange={e => onMeta({ height: Math.max(1, Math.round(+e.target.value || 1)) })} className={numberInputClass} />
+          <input type="number" min={1} value={gauge.width} onChange={e => onMeta({ width: Math.max(1, parseIntegerInput(e.target.value, 1)) })} className={numberInputClass} />
+          <input type="number" min={1} value={gauge.height} onChange={e => onMeta({ height: Math.max(1, parseIntegerInput(e.target.value, 1)) })} className={numberInputClass} />
         </div>
         <button type="button" onClick={onFitToContent}
           className="w-full px-2 py-1.5 text-[10px] border border-border rounded hover:bg-secondary transition-colors cursor-pointer text-foreground"
@@ -362,7 +367,7 @@ export function GaugePanel({
               <input type="number"
                 value={Math.round(opts.thermoUnit === 'F' ? opts.thermoMinF : (opts.thermoMinF - 32) * 5 / 9)}
                 onChange={e => {
-                  const v = +e.target.value || 0;
+                  const v = parseNumberInput(e.target.value);
                   onChange({ thermoMinF: opts.thermoUnit === 'F' ? v : v * 9 / 5 + 32 });
                 }}
                 className={numberInputClass} title="Minimum (bottom of the tube)"
@@ -370,7 +375,7 @@ export function GaugePanel({
               <input type="number"
                 value={Math.round(opts.thermoUnit === 'F' ? opts.thermoMaxF : (opts.thermoMaxF - 32) * 5 / 9)}
                 onChange={e => {
-                  const v = +e.target.value || 0;
+                  const v = parseNumberInput(e.target.value);
                   onChange({ thermoMaxF: opts.thermoUnit === 'F' ? v : v * 9 / 5 + 32 });
                 }}
                 className={numberInputClass} title="Maximum (top of the tube)"
@@ -378,6 +383,7 @@ export function GaugePanel({
             </div>
             <span className="text-[9px] text-muted-foreground leading-relaxed">
               Both °F and °C scales always show — this just picks which unit you're typing in.
+              AIDA64/InfoPanel exports use this range in °C (typical for temp sensors). Preview is 0–100% of the range.
             </span>
           </CtrlRow>
           <CtrlRow label={`Tick marks — ${opts.thermoTickCount}`}>
@@ -481,16 +487,18 @@ export function GaugePanel({
             <SliderRow value={opts.tickLength} min={2} max={60} onChange={v => onChange({ tickLength: v })} />
           </CtrlRow>
           {opts.needleStyle !== 'classic' && (
-            <CtrlRow label={`Needle center diameter — ${opts.needleCenterDia}px`}>
-              <SliderRow value={opts.needleCenterDia} min={10} max={120} onChange={v => onChange({ needleCenterDia: v })} />
-            </CtrlRow>
+            <>
+              <CtrlRow label={`Needle center diameter — ${opts.needleCenterDia}px`}>
+                <SliderRow value={opts.needleCenterDia} min={10} max={120} onChange={v => onChange({ needleCenterDia: v })} />
+              </CtrlRow>
+              <CtrlRow label="Needle center color">
+                <ColorField value={opts.needleCenterColor} onChange={v => onChange({ needleCenterColor: v })} />
+              </CtrlRow>
+              <CtrlRow label="Needle center border color">
+                <ColorField value={opts.needleCenterBorderColor} onChange={v => onChange({ needleCenterBorderColor: v })} />
+              </CtrlRow>
+            </>
           )}
-          <CtrlRow label="Needle center color">
-            <ColorField value={opts.needleCenterColor} onChange={v => onChange({ needleCenterColor: v })} />
-          </CtrlRow>
-          <CtrlRow label="Needle center border color">
-            <ColorField value={opts.needleCenterBorderColor} onChange={v => onChange({ needleCenterBorderColor: v })} />
-          </CtrlRow>
           <CtrlRow label="Needle color">
             <ColorField value={opts.needleColor} onChange={v => onChange({ needleColor: v })} />
           </CtrlRow>
@@ -521,18 +529,18 @@ export function GaugePanel({
               </CtrlRow>
               <CtrlRow label="Dial value range">
                 <div className="grid grid-cols-3 gap-2">
-                  <input type="number" value={opts.dialMin} onChange={e => onChange({ dialMin: Math.round(+e.target.value || 0) })}
+                  <input type="number" value={opts.dialMin} onChange={e => onChange({ dialMin: parseIntegerInput(e.target.value) })}
                     className={numberInputClass} title="Minimum (tick label at the start of the arc)"
                   />
-                  <input type="number" value={opts.dialMax} onChange={e => onChange({ dialMax: Math.round(+e.target.value || 0) })}
+                  <input type="number" value={opts.dialMax} onChange={e => onChange({ dialMax: parseIntegerInput(e.target.value) })}
                     className={numberInputClass} title="Maximum (tick label at the end of the arc)"
                   />
-                  <input type="number" min={1} value={opts.dialTickStep} onChange={e => onChange({ dialTickStep: Math.max(1, Math.round(+e.target.value || 1)) })}
+                  <input type="number" min={1} value={opts.dialTickStep} onChange={e => onChange({ dialTickStep: Math.max(1, parseIntegerInput(e.target.value, 1)) })}
                     className={numberInputClass} title="Step between numbered ticks"
                   />
                 </div>
                 <span className="text-[9px] text-muted-foreground leading-relaxed">
-                  Min / max / step for the numbered tick marks around the dial.
+                  Min / max / step for the numbered tick marks. The same min/max are written into AIDA64 and InfoPanel exports.
                 </span>
               </CtrlRow>
             </>
@@ -568,7 +576,7 @@ export function GaugePanel({
             {([['rgba(128,128,128,0.2)', 'Default'], ['transparent', 'None'], ['#000000', 'Black'], ['#ffffff', 'White']] as [string, string][]).map(([c, l]) => (
               <Pill key={c} active={opts.trackColor === c} onClick={() => onChange({ trackColor: c })}>{l}</Pill>
             ))}
-            <input type="color" value={opts.trackColor.startsWith('#') ? opts.trackColor : '#808080'}
+            <input type="color" value={opts.trackColor?.startsWith('#') ? opts.trackColor : '#808080'}
               onChange={e => onChange({ trackColor: e.target.value })}
               className="w-5 h-5 rounded cursor-pointer border border-border bg-transparent p-0"
             />

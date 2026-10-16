@@ -25,7 +25,7 @@
 // aidaSensorId falls back to SCPUUTI ("CPU Utilization", confirmed from the
 // same official template, a natural 0-100% metric) and is always enabled.
 import { renderBackground } from './backgroundRender';
-import { drawOn } from './gaugeRender';
+import { drawOn, gaugeSensorRange } from './gaugeRender';
 import type { ThemesMap } from './gaugeRender';
 import type { GaugeInstance, PanelConfig } from '../types';
 import { loadImage } from './imageCache';
@@ -164,10 +164,11 @@ async function buildBundleParts(panel: PanelConfig, gauges: GaugeInstance[], the
     const explicitId = sanitizeSensorId(gauge.aidaSensorId);
     if (!explicitId) defaultedGaugeNames.push(gauge.name);
     const idTag = `[GAUGE]${explicitId || DEFAULT_SENSOR_ID}`;
+    const range = gaugeSensorRange(gauge.opts);
     items.push(
       `<ID>${idTag}</ID><LBL>${sanitizeTagText(gauge.name)}</LBL><TYP>Custom</TYP><SIZ>S</SIZ>` +
       `<RESIZW>${renderedWidth}</RESIZW><RESIZH>${renderedHeight}</RESIZH>` +
-      `<MINVAL>0</MINVAL><MAXVAL>100</MAXVAL><SHWICO>0</SHWICO><SHWVAL>0</SHWVAL>` +
+      `<MINVAL>${range.min}</MINVAL><MAXVAL>${range.max}</MAXVAL><SHWICO>0</SHWICO><SHWVAL>0</SHWVAL>` +
       `<TXTSIZ>12</TXTSIZ><FNTNAM>Segoe UI</FNTNAM><VALCOL>16777215</VALCOL><VALBI>00</VALBI>` +
       `<ITMX>${itmX}</ITMX><ITMY>${itmY}</ITMY><STAFLS>${stateNames.join('|')}</STAFLS>`,
     );

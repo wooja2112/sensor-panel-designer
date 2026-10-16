@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { PanelConfig, GaugeInstance } from '../types';
 import type { ThemesMap } from '../lib/gaugeRender';
 import { renderPanel } from '../lib/compose';
+import { barCanvasIsSwapped } from '../lib/gaugeRender';
 import { getCachedImage, loadImage } from '../lib/imageCache';
 
 type Zoom = number | 'fit';
@@ -42,7 +43,7 @@ interface ResizeState {
 // gaugeRender.ts's drawOn — kept in sync with it, not derived from it,
 // since the two live in different modules.
 function boxSize(g: GaugeInstance): { width: number; height: number; swapped: boolean } {
-  const swapped = g.opts.mode === 'bar' && (g.opts.rotation === 90 || g.opts.rotation === 270);
+  const swapped = barCanvasIsSwapped(g.opts);
   return swapped ? { width: g.height, height: g.width, swapped } : { width: g.width, height: g.height, swapped };
 }
 

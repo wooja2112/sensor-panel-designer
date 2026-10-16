@@ -37,13 +37,14 @@ export function CtrlRow({ label, children }: { label: string; children: ReactNod
 }
 
 export function ColorField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const hex = /^#[0-9a-fA-F]{6}$/.test(value) ? value : '#000000';
   return (
     <div className="flex items-center gap-3">
       <div className="relative">
-        <div className="w-8 h-8 rounded border border-border" style={{ background: value }} />
+        <div className="w-8 h-8 rounded border border-border" style={{ background: value || hex }} />
         <input
           type="color"
-          value={value}
+          value={hex}
           onChange={e => onChange(e.target.value)}
           className="absolute inset-0 opacity-0 w-full h-full cursor-pointer"
         />
