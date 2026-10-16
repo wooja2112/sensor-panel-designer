@@ -4,7 +4,7 @@
 import { CtrlRow } from './ui-primitives';
 
 export function MultiSelectPanel({
-  count, onMakeSameSize, onFitAllToContent, onSpaceEvenly, onCenterH, onCenterV, onDeselect,
+  count, onMakeSameSize, onFitAllToContent, onSpaceEvenly, onCenterH, onCenterV, onDuplicate, onDelete, onDeselect,
 }: {
   count: number;
   onMakeSameSize: () => void;
@@ -12,14 +12,16 @@ export function MultiSelectPanel({
   onSpaceEvenly: () => void;
   onCenterH: () => void;
   onCenterV: () => void;
+  onDuplicate: () => void;
+  onDelete: () => void;
   onDeselect: () => void;
 }) {
   return (
     <div className="flex flex-col gap-3.5">
       <CtrlRow label={`${count} gauges selected`}>
         <span className="text-[11px] text-muted-foreground leading-relaxed">
-          The first gauge you selected is the size reference; the first and
-          last selected are the fixed ends for spacing.
+          Drag any selected gauge to move the group. The first selected is
+          the size reference; the first and last are the fixed ends for spacing.
         </span>
       </CtrlRow>
 
@@ -50,6 +52,17 @@ export function MultiSelectPanel({
         className="px-3 py-1.5 text-[11px] border border-border rounded hover:bg-secondary transition-colors disabled:opacity-40 cursor-pointer text-foreground"
         title="Evenly space the gauges you selected in between along a line from the first to the last one you selected"
       >Space evenly</button>
+
+      <div className="flex gap-2">
+        <button type="button" onClick={onDuplicate}
+          className="flex-1 px-2 py-1.5 text-[10px] border border-border rounded hover:bg-secondary transition-colors cursor-pointer text-foreground tracking-wider uppercase"
+          title="Duplicate every selected gauge (Ctrl+D)"
+        >Duplicate</button>
+        <button type="button" onClick={onDelete}
+          className="flex-1 px-2 py-1.5 text-[10px] border border-destructive/40 text-destructive rounded hover:bg-destructive/10 transition-colors cursor-pointer tracking-wider uppercase"
+          title="Delete every selected gauge (Delete)"
+        >Delete</button>
+      </div>
 
       <button type="button" onClick={onDeselect}
         className="px-3 py-1.5 text-[11px] border border-border rounded hover:bg-secondary transition-colors cursor-pointer text-foreground"

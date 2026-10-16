@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { GaugeInstance, PanelConfig } from './types';
-import { createGaugeInstance, defaultPanelConfig } from './types';
+import { cloneGaugeInstance, createGaugeInstance, defaultPanelConfig, remapThemeKeys } from './types';
 import type { BackgroundOptions } from './lib/backgroundRender';
 import type { DrawOptions, GaugeMode, ThemesMap } from './lib/gaugeRender';
 import { DEFAULT_THEMES, computeGaugeOuterRadius, solveRingBoxForOuterRadius } from './lib/gaugeRender';
@@ -14,6 +14,9 @@ import { CanvasWorkspace } from './components/CanvasWorkspace';
 import { LayersPanel } from './components/LayersPanel';
 import { ExportBar } from './components/ExportBar';
 import { ThemeDesigner } from './components/ThemeDesigner';
+import { useDesignHistory } from './hooks/useDesignHistory';
+import type { DesignSnapshot } from './lib/designHistory';
+import { isEditableKeyboardTarget } from './lib/keyboard';
 
 // circ and needle are both drawn as a ring of some radius, so "make same
 // size" can equalize how big they actually look (see computeGaugeOuterRadius
@@ -137,18 +140,105 @@ export default function App() {
     return () => clearTimeout(t);
   }, [panel, gauges, themes]);
 
-  const startFresh = useCallback(() => {
-    clearAutosave();
-    setPanel(defaultPanelConfig());
-    setGauges([]);
-    setThemes(structuredClone(DEFAULT_THEMES));
-    setSelectedIds([]);
-    setRestoredBannerDismissed(true);
-  }, []);
-
   const handleSave = useCallback(() => {
     downloadPanelFile(panel, gauges, themes, `panel-${timestamp()}.sensorpaneldesign`);
   }, [panel, gauges, themes]);
+
+  const applySnapshot = useCallback((snapshot: DesignSnapshot) => {
+    setPanel(snapshot.panel);
+    setGauges(snapshot.gauges);
+    setThemes(snapshot.themes);
+    setSelectedIds(snapshot.selectedIds);
+  }, []);
+
+  const { undo, redo, replace, canUndo, canRedo } = useDesignHistory(
+    panel, gauges, themes, selectedIds, applySnapshot,
+  );
+
+  const startFresh = useCallback(() => {
+    clearAutosave();
+    replace({
+      panel: defaultPanelConfig(),
+      gauges: [],
+      themes: structuredClone(DEFAULT_THEMES),
+      selectedIds: [],
+    });
+    setRestoredBannerDismissed(true);
+  }, [replace]);
+
+  const deleteSelected = useCallback(() => {
+    if (selectedIds.length === 0) return;
+    const ids = new Set(selectedIds);
+    setGauges(gs => gs.filter(g => !ids.has(g.id)));
+    setSelectedIds([]);
+  }, [selectedIds]);
+
+  const nudgeSelected = useCallback((dx: number, dy: number) => {
+    if (selectedIds.length === 0) return;
+    const ids = new Set(selectedIds);
+    setGauges(gs => gs.map(g => ids.has(g.id) ? { ...g, x: g.x + dx, y: g.y + dy } : g));
+  }, [selectedIds]);
+
+  const duplicateSelected = useCallback(() => {
+    const selected = selectedIds
+      .map(id => gauges.find(g => g.id === id))
+      .filter((g): g is GaugeInstance => Boolean(g));
+    if (selected.length === 0) return;
+    const clones = selected.map(cloneGaugeInstance);
+    setGauges(gs => [...gs, ...clones]);
+    setSelectedIds(clones.map(c => c.id));
+  }, [gauges, selectedIds]);
+
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      const mod = e.ctrlKey || e.metaKey;
+      const key = e.key.toLowerCase();
+
+      if (mod && key === 's') {
+        e.preventDefault();
+        handleSave();
+        return;
+      }
+
+      if (mod && key === 'z') {
+        if (isEditableKeyboardTarget(e.target)) return;
+        e.preventDefault();
+        if (e.shiftKey) redo();
+        else undo();
+        return;
+      }
+
+      if (mod && key === 'y') {
+        if (isEditableKeyboardTarget(e.target)) return;
+        e.preventDefault();
+        redo();
+        return;
+      }
+
+      if (isEditableKeyboardTarget(e.target) || showDesigner) return;
+
+      if (mod && key === 'd') {
+        e.preventDefault();
+        duplicateSelected();
+        return;
+      }
+
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (selectedIds.length === 0) return;
+        e.preventDefault();
+        deleteSelected();
+        return;
+      }
+
+      const step = e.shiftKey ? 10 : 1;
+      if (e.key === 'ArrowLeft') { e.preventDefault(); nudgeSelected(-step, 0); }
+      else if (e.key === 'ArrowRight') { e.preventDefault(); nudgeSelected(step, 0); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); nudgeSelected(0, -step); }
+      else if (e.key === 'ArrowDown') { e.preventDefault(); nudgeSelected(0, step); }
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [handleSave, undo, redo, deleteSelected, duplicateSelected, nudgeSelected, selectedIds.length, showDesigner]);
 
   const handleOpenClick = useCallback(() => fileInputRef.current?.click(), []);
 
@@ -160,17 +250,19 @@ export default function App() {
     reader.onload = () => {
       try {
         const data = parsePanelFile(String(reader.result));
-        setPanel(data.panel);
-        setGauges(data.gauges);
-        setThemes(data.themes);
-        setSelectedIds([]);
+        replace({
+          panel: data.panel,
+          gauges: data.gauges,
+          themes: data.themes,
+          selectedIds: [],
+        });
         setRestoredBannerDismissed(true);
       } catch (err) {
         window.alert(err instanceof Error ? err.message : 'Failed to open file.');
       }
     };
     reader.readAsText(file);
-  }, []);
+  }, [replace]);
 
   const updateBackground = useCallback((patch: Partial<BackgroundOptions>) => {
     setPanel(p => ({ ...p, background: { ...p.background, ...patch } }));
@@ -212,8 +304,13 @@ export default function App() {
     }));
   }, [selectedIds, themes]);
 
-  const moveGauge = useCallback((id: string, x: number, y: number) => {
-    setGauges(gs => gs.map(g => g.id === id ? { ...g, x, y } : g));
+  const moveGauges = useCallback((moves: { id: string; x: number; y: number }[]) => {
+    if (moves.length === 0) return;
+    const byId = new Map(moves.map(m => [m.id, m]));
+    setGauges(gs => gs.map(g => {
+      const m = byId.get(g.id);
+      return m ? { ...g, x: m.x, y: m.y } : g;
+    }));
   }, []);
 
   const resizeGauge = useCallback((id: string, width: number, height: number) => {
@@ -224,21 +321,6 @@ export default function App() {
     setGauges(gs => gs.filter(g => g.id !== id));
     setSelectedIds(sel => sel.filter(x => x !== id));
   }, []);
-
-  const duplicateGauge = useCallback((id: string) => {
-    const src = gauges.find(g => g.id === id);
-    if (!src) return;
-    const clone: GaugeInstance = {
-      ...src,
-      id: `${src.id}-copy-${Date.now().toString(36)}`,
-      name: `${src.name} copy`,
-      x: src.x + 16,
-      y: src.y + 16,
-      opts: { ...src.opts, containerCorners: [...src.opts.containerCorners] },
-    };
-    setGauges(gs => [...gs, clone]);
-    setSelectedIds([clone.id]);
-  }, [gauges]);
 
   const reorderGauge = useCallback((id: string, dir: -1 | 1) => {
     setGauges(gs => {
@@ -267,13 +349,21 @@ export default function App() {
         <div className="ml-auto flex gap-2">
           <input ref={fileInputRef} type="file" accept=".sensorpaneldesign,application/json"
             className="hidden" onChange={handleFileSelected} />
+          <button type="button" onClick={undo} disabled={!canUndo}
+            className="px-3 py-1.5 text-[11px] border border-border rounded hover:bg-secondary transition-colors cursor-pointer text-foreground disabled:opacity-40 disabled:pointer-events-none"
+            title="Undo (Ctrl+Z)"
+          >Undo</button>
+          <button type="button" onClick={redo} disabled={!canRedo}
+            className="px-3 py-1.5 text-[11px] border border-border rounded hover:bg-secondary transition-colors cursor-pointer text-foreground disabled:opacity-40 disabled:pointer-events-none"
+            title="Redo (Ctrl+Y / Ctrl+Shift+Z)"
+          >Redo</button>
           <button type="button" onClick={handleOpenClick}
             className="px-3 py-1.5 text-[11px] border border-border rounded hover:bg-secondary transition-colors cursor-pointer text-foreground"
             title="Open a .sensorpaneldesign project file"
           >Open project…</button>
           <button type="button" onClick={handleSave}
             className="px-3 py-1.5 text-[11px] bg-primary text-primary-foreground rounded hover:opacity-90 transition-opacity cursor-pointer font-medium"
-            title="Save this design as a .sensorpaneldesign project file"
+            title="Save this design as a .sensorpaneldesign project file (Ctrl+S)"
           >Save project</button>
         </div>
       </div>
@@ -297,7 +387,7 @@ export default function App() {
               themes={themes}
               selectedIds={selectedIds}
               onSelect={selectGauge}
-              onMoveGauge={moveGauge}
+              onMoveGauges={moveGauges}
               onResizeGauge={resizeGauge}
             />
           </div>
@@ -320,6 +410,8 @@ export default function App() {
               onSpaceEvenly={spaceEvenly}
               onCenterH={() => centerSelection('x')}
               onCenterV={() => centerSelection('y')}
+              onDuplicate={duplicateSelected}
+              onDelete={deleteSelected}
               onDeselect={() => setSelectedIds([])}
             />
           ) : selectedGauge ? (
@@ -331,13 +423,13 @@ export default function App() {
               onMeta={patch => updateGaugeMeta(selectedGauge.id, patch)}
               onOpenThemeDesigner={() => setShowDesigner(true)}
               onDelete={() => deleteGauge(selectedGauge.id)}
-              onDuplicate={() => duplicateGauge(selectedGauge.id)}
+              onDuplicate={duplicateSelected}
               onFitToContent={() => fitToContent(selectedGauge.id)}
             />
           ) : (
             <div className="text-[11px] text-muted-foreground">
               Select a gauge on the panel or in the layers list to edit its settings, or add a new one below the canvas.
-              Shift/ctrl-click to select multiple.
+              Shift/ctrl-click to select multiple. Arrows nudge (Shift for 10px), Delete removes, Ctrl+D duplicates, Ctrl+Z undoes.
             </div>
           )}
         </div>
@@ -357,9 +449,8 @@ export default function App() {
           activeKey={selectedGauge?.themeKey ?? Object.keys(themes)[0]}
           onClose={() => setShowDesigner(false)}
           onThemesChange={setThemes}
-          onActiveKeyChange={key => {
-            if (selectedGauge) updateGaugeMeta(selectedGauge.id, { themeKey: key });
-          }}
+          onRemapThemeKey={(from, to) => setGauges(gs => remapThemeKeys(gs, from, to))}
+          themeUseCount={key => gauges.filter(g => g.themeKey === key).length}
         />
       )}
     </div>

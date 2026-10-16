@@ -3,7 +3,7 @@ import { barCanvasIsSwapped, defaultDrawOptions, gaugeSensorRange } from './gaug
 import { isAllowedImageSrc, sanitizeImageSrc } from './imageCache';
 import { parseIntegerInput, parseNumberInput } from './number';
 import { parsePanelFile } from './file';
-import { normalizeGauge } from '../types';
+import { cloneGaugeInstance, normalizeGauge, remapThemeKeys } from '../types';
 
 describe('parseNumberInput', () => {
   it('keeps negatives instead of coercing them to the fallback', () => {
@@ -35,6 +35,33 @@ describe('normalizeGauge', () => {
     expect(g.aidaSensorId).toBe('');
     expect(g.hwinfoSensorLabel).toBe('');
     expect(() => g.opts.dialTitle.split('\n')).not.toThrow();
+  });
+});
+
+describe('remapThemeKeys', () => {
+  it('rewrites every gauge pointing at the old key and leaves others alone', () => {
+    const a = normalizeGauge({ id: 'a', themeKey: 'classic', opts: { mode: 'bar' } });
+    const b = normalizeGauge({ id: 'b', themeKey: 'ember', opts: { mode: 'circ' } });
+    const c = normalizeGauge({ id: 'c', themeKey: 'classic', opts: { mode: 'needle' } });
+    const next = remapThemeKeys([a, b, c], 'classic', 'ocean');
+    expect(next.map(g => g.themeKey)).toEqual(['ocean', 'ember', 'ocean']);
+    const same = [a];
+    expect(remapThemeKeys(same, 'classic', 'classic')).toBe(same);
+  });
+});
+
+describe('cloneGaugeInstance', () => {
+  it('gives each copy a unique id and offsets it', () => {
+    const src = normalizeGauge({ id: 'g1', name: 'CPU', x: 10, y: 20, opts: { mode: 'bar' } });
+    const a = cloneGaugeInstance(src);
+    const b = cloneGaugeInstance(src);
+    expect(a.id).not.toBe(src.id);
+    expect(a.id).not.toBe(b.id);
+    expect(a.name).toBe('CPU copy');
+    expect(a.x).toBe(26);
+    expect(a.y).toBe(36);
+    expect(a.opts.containerCorners).not.toBe(src.opts.containerCorners);
+    expect(a.opts.containerCorners).toEqual(src.opts.containerCorners);
   });
 });
 

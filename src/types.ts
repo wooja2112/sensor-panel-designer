@@ -56,6 +56,17 @@ export function createGaugeInstance(mode: GaugeMode, themeKey: string, x: number
   };
 }
 
+export function cloneGaugeInstance(src: GaugeInstance): GaugeInstance {
+  return {
+    ...src,
+    id: makeGaugeId(),
+    name: `${src.name} copy`,
+    x: src.x + 16,
+    y: src.y + 16,
+    opts: { ...src.opts, containerCorners: [...src.opts.containerCorners] },
+  };
+}
+
 // Backfills fields that didn't exist yet when an older .sensorpaneldesign
 // file (or localStorage autosave) was written, so loading one doesn't leave
 // a gauge with `undefined` where code expects a string (e.g. .trim() in
@@ -117,6 +128,11 @@ export function normalizeThemes(themes: ThemesMap | undefined | null): ThemesMap
 export function resolveDrawOptions(gauge: GaugeInstance, themes: ThemesMap): DrawOptions {
   const themeColors = themes[gauge.themeKey] ?? Object.values(themes)[0];
   return { ...gauge.opts, themeColors };
+}
+
+export function remapThemeKeys(gauges: GaugeInstance[], from: string, to: string): GaugeInstance[] {
+  if (from === to) return gauges;
+  return gauges.map(g => g.themeKey === from ? { ...g, themeKey: to } : g);
 }
 
 export function defaultPanelConfig(): PanelConfig {

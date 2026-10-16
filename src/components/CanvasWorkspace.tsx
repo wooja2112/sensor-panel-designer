@@ -10,12 +10,12 @@ type Zoom = number | 'fit';
 const MIN_GAUGE_SIZE = 20;
 
 interface DragState {
-  id: string;
   pointerId: number;
   startClientX: number;
   startClientY: number;
-  startX: number;
-  startY: number;
+  // Every selected gauge's origin at pointerdown, so a multi-select
+  // translates as a group instead of only the hit target moving.
+  origins: { id: string; x: number; y: number }[];
 }
 
 interface ResizeState {
@@ -48,14 +48,14 @@ function boxSize(g: GaugeInstance): { width: number; height: number; swapped: bo
 }
 
 export function CanvasWorkspace({
-  panel, gauges, themes, selectedIds, onSelect, onMoveGauge, onResizeGauge,
+  panel, gauges, themes, selectedIds, onSelect, onMoveGauges, onResizeGauge,
 }: {
   panel: PanelConfig;
   gauges: GaugeInstance[];
   themes: ThemesMap;
   selectedIds: string[];
   onSelect: (id: string | null, additive?: boolean) => void;
-  onMoveGauge: (id: string, x: number, y: number) => void;
+  onMoveGauges: (moves: { id: string; x: number; y: number }[]) => void;
   onResizeGauge: (id: string, width: number, height: number) => void;
 }) {
   const [zoom, setZoom] = useState<Zoom>('fit');
@@ -108,9 +108,9 @@ export function CanvasWorkspace({
     function handleMove(e: PointerEvent) {
       const drag = dragRef.current;
       if (drag && e.pointerId === drag.pointerId) {
-        const dx = (e.clientX - drag.startClientX) / scaleRef.current;
-        const dy = (e.clientY - drag.startClientY) / scaleRef.current;
-        onMoveGauge(drag.id, Math.round(drag.startX + dx), Math.round(drag.startY + dy));
+        const dx = Math.round((e.clientX - drag.startClientX) / scaleRef.current);
+        const dy = Math.round((e.clientY - drag.startClientY) / scaleRef.current);
+        onMoveGauges(drag.origins.map(o => ({ id: o.id, x: o.x + dx, y: o.y + dy })));
         return;
       }
       const resize = resizeRef.current;
@@ -138,7 +138,7 @@ export function CanvasWorkspace({
       window.removeEventListener('pointermove', handleMove);
       window.removeEventListener('pointerup', handleUp);
     };
-  }, [onMoveGauge, onResizeGauge]);
+  }, [onMoveGauges, onResizeGauge]);
 
   return (
     <div className="flex flex-col gap-3 flex-1 min-h-0">
@@ -197,20 +197,29 @@ export function CanvasWorkspace({
                 onPointerDown={e => {
                   e.stopPropagation();
                   const additive = e.shiftKey || e.ctrlKey || e.metaKey;
-                  onSelect(g.id, additive);
-                  // Shift/ctrl-click only toggles selection membership — it
-                  // shouldn't also start dragging the gauge under the cursor.
-                  if (additive) return;
+                  if (additive) {
+                    onSelect(g.id, true);
+                    return;
+                  }
+                  // Clicking an already-selected gauge keeps the rest of
+                  // the selection so the drag can move the whole group.
+                  // Clicking an unselected one replaces the selection.
+                  const alreadySelected = selectedIds.includes(g.id);
+                  if (!alreadySelected) onSelect(g.id, false);
+                  const idsToMove = alreadySelected ? selectedIds : [g.id];
                   (e.target as HTMLElement).setPointerCapture(e.pointerId);
                   dragRef.current = {
-                    id: g.id,
                     pointerId: e.pointerId,
                     startClientX: e.clientX,
                     startClientY: e.clientY,
-                    startX: g.x,
-                    startY: g.y,
+                    origins: gauges
+                      .filter(x => idsToMove.includes(x.id))
+                      .map(x => ({ id: x.id, x: x.x, y: x.y })),
                   };
                 }}
+                role="button"
+                aria-label={g.name}
+                aria-pressed={isSelected}
                 className={[
                   'absolute cursor-move border-2',
                   isPrimary ? 'border-primary' : isSelected ? 'border-primary/60 border-dashed' : 'border-transparent hover:border-primary/50',

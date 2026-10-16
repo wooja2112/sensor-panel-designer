@@ -7,13 +7,15 @@ export function ThemeDesigner({
   activeKey,
   onClose,
   onThemesChange,
-  onActiveKeyChange,
+  onRemapThemeKey,
+  themeUseCount,
 }: {
   themes: ThemesMap;
   activeKey: string;
   onClose: () => void;
   onThemesChange: (t: ThemesMap) => void;
-  onActiveKeyChange: (k: string) => void;
+  onRemapThemeKey: (from: string, to: string) => void;
+  themeUseCount: (key: string) => number;
 }) {
   const [editingKey, setEditingKey] = useState(activeKey);
   const [nameInput, setNameInput] = useState(activeKey);
@@ -34,7 +36,7 @@ export function ThemeDesigner({
       updated[k === editingKey ? newKey : k] = v;
     }
     onThemesChange(updated);
-    if (editingKey === activeKey) onActiveKeyChange(newKey);
+    onRemapThemeKey(editingKey, newKey);
     setEditingKey(newKey);
     setNameInput(newKey);
   };
@@ -53,8 +55,17 @@ export function ThemeDesigner({
     const updated = { ...themes };
     delete updated[editingKey];
     const firstKey = Object.keys(updated)[0];
+    const usedBy = themeUseCount(editingKey);
+    if (usedBy > 0) {
+      const ok = window.confirm(
+        usedBy === 1
+          ? `Delete "${editingKey}"? 1 gauge will switch to "${firstKey}".`
+          : `Delete "${editingKey}"? ${usedBy} gauges will switch to "${firstKey}".`,
+      );
+      if (!ok) return;
+    }
     onThemesChange(updated);
-    if (editingKey === activeKey) onActiveKeyChange(firstKey);
+    onRemapThemeKey(editingKey, firstKey);
     setEditingKey(firstKey);
     setNameInput(firstKey);
   };
