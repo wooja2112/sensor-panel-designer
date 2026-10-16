@@ -56,6 +56,7 @@ import type { ThemesMap } from './gaugeRender';
 import type { GaugeInstance, PanelConfig } from '../types';
 import { resolveDrawOptions } from '../types';
 import { loadImage } from './imageCache';
+import { JSZip } from './zip';
 
 function slugify(name: string, fallback: string): string {
   const s = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
@@ -227,7 +228,6 @@ export async function downloadInfoPanelBundle(
   const { profileXml, displayItemsXml, files } = await buildBundleParts(panel, gauges, themes, onProgress);
 
   onProgress?.(`Packaging .infopanel (${files.length + 2} files)…`);
-  const JSZip = (await import('jszip')).default;
   const zip = new JSZip();
   zip.file('Profile.xml', profileXml);
   zip.file('DisplayItems.xml', displayItemsXml);

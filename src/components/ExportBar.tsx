@@ -7,6 +7,7 @@ import { renderPanel, timestamp, downloadCanvasPng } from '../lib/compose';
 import { downloadAida64Bundle } from '../lib/aida64';
 import { downloadInfoPanelBundle } from '../lib/infopanel';
 import { loadImage } from '../lib/imageCache';
+import { JSZip } from '../lib/zip';
 
 interface FrameData {
   dataUrl: string;
@@ -133,7 +134,6 @@ export function ExportBar({
     setZipping(true);
     setStatus('Building zip…');
     try {
-      const JSZip = (await import('jszip')).default;
       const zip = new JSZip();
       for (const f of frames) zip.file(`${f.label}.png`, f.dataUrl.split(',')[1], { base64: true });
       const blob = await zip.generateAsync({ type: 'blob' });

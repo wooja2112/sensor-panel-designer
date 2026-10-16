@@ -30,6 +30,7 @@ import type { ThemesMap } from './gaugeRender';
 import type { GaugeInstance, PanelConfig } from '../types';
 import { loadImage } from './imageCache';
 import { resolveDrawOptions } from '../types';
+import { JSZip } from './zip';
 
 const AIDA_STATE_COUNT = 16;
 const DEFAULT_SENSOR_ID = 'SCPUUTI'; // AIDA64's real mnemonic for "CPU Utilization"
@@ -203,7 +204,6 @@ export async function downloadAida64Bundle(
   const { defText, files, defaultedGaugeNames } = await buildBundleParts(panel, gauges, themes, onProgress);
 
   onProgress?.(`Packaging .spzip (${files.length + 1} files)…`);
-  const JSZip = (await import('jszip')).default;
   const zip = new JSZip();
   zip.file('panel.sp2', toUtf16LEBytes(defText));
   for (const f of files) zip.file(f.name, f.blob);

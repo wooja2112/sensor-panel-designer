@@ -46,4 +46,4 @@ There is no backend.
 - **AIDA64:** the file is UTF-16LE with a BOM. Colors are COLORREF (BGR). Each gauge has exactly 16 state images. Disabled items are hidden, so unbound gauges default to sensor `SCPUUTI`.
 - **InfoPanel:** it is .NET XmlSerializer XML. Asset paths inside the zip must use backslashes (`assets\name.png`).
 
-Each gauge's exports are pre-rendered frame images (AIDA64 states, InfoPanel images, ExportBar's 21-frame set). Gauges never draw live in the target app. `jszip` is loaded with a dynamic `import()` and is pre-bundled through `optimizeDeps` in `vite.config.ts`.
+Each gauge's exports are pre-rendered frame images (AIDA64 states, InfoPanel images, ExportBar's 21-frame set). Gauges never draw live in the target app. `jszip` is statically imported from `lib/zip.ts` (a dynamic `import('jszip')` 404s in Vite after a dep re-optimize).
