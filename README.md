@@ -1,32 +1,35 @@
-# React + TypeScript + Vite
+# Sensor Panel Designer
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+A browser-only app for designing hardware-monitor sensor panels: a background plus positioned gauges. There is no server. Designs stay in the browser and download as files.
 
-Currently, two official plugins are available:
+Gauges can be bars (flat, ascending, slanted, or thermometer), circular rings, needles, frames, labels, or images. Colors come from shared themes, so editing a theme updates every gauge that uses it.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Run
 
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```bash
+npm install
+npm run dev
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories...
+| Command | What it does |
+| --- | --- |
+| `npm run dev` | Dev server |
+| `npm run build` | Type-check, then production build |
+| `npm run preview` | Serve the production build |
+| `npm run lint` | Lint |
+| `npm run test` | Unit tests |
+
+## Files
+
+| Extension | Role |
+| --- | --- |
+| `.sensorpaneldesign` | This app's project file. Save and Open use it. The session also autosaves to localStorage. |
+| PNG | The whole panel, one gauge, or a zip of gauge frames. |
+| `.spzip` | AIDA64 SensorPanel bundle. Unbound gauges export as CPU Utilization (`SCPUUTI`) so they stay visible; rebind them in AIDA64. |
+| `.infopanel` | InfoPanel profile. Gauges are unbound because those sensor ids are machine-specific; bind them in InfoPanel after import. |
+
+Open also accepts AIDA64 and InfoPanel bundles. Bundles saved by this app reopen as an editable design. Bundles from elsewhere come in as placed images.
+
+## Editing
+
+Shift- or Ctrl-click selects more than one gauge. The first selected gauge is the anchor for Make same size and Space evenly. Arrow keys nudge the selection (Shift moves 10px). Delete removes it, Ctrl+D duplicates it, Ctrl+Z undoes, and Ctrl+S saves the project file.
