@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { GaugeInstance, PanelConfig } from '../types';
 import { resolveDrawOptions } from '../types';
 import type { ThemesMap } from '../lib/gaugeRender';
-import { isStaticGaugeMode, makeStamp } from '../lib/gaugeRender';
+import { frameSetOnCounts, isStaticGaugeMode, makeStamp, previewValueToOnCount } from '../lib/gaugeRender';
 import { designImageSrcs, downloadCanvasPng, renderGaugeCanvas, renderPanel, timestamp } from '../lib/compose';
 import { downloadAida64Bundle } from '../lib/aida64';
 import { downloadInfoPanelBundle } from '../lib/infopanel';
@@ -74,7 +74,7 @@ export function ExportBar({
   const downloadGaugePng = () => {
     if (!selectedGauge) return;
     const opts = resolveDrawOptions(selectedGauge, themes);
-    const onCount = opts.nSegs === 0 ? selectedGauge.previewValue : Math.round((selectedGauge.previewValue / 100) * opts.nSegs);
+    const onCount = previewValueToOnCount(selectedGauge.previewValue, opts.nSegs);
     void preloadImages(designImageSrcs(panel, [selectedGauge])).then(() => {
       // drawOn may resize the canvas (swapping width/height) for a
       // 90°/270°-rotated bar gauge, so the filename reflects its actual size.
@@ -86,18 +86,9 @@ export function ExportBar({
   const generateFrames = () => {
     if (!selectedGauge) return;
     const opts = resolveDrawOptions(selectedGauge, themes);
-    // Containers have no percentage value, so they're a single static image.
-    // Everything else gets 21 frames at 5%-of-value steps (0,5,...,100),
-    // independent of the gauge's own segment count, so InfoPanel-style
-    // consumers can update the displayed image every 5% of live sensor
-    // value rather than only at whatever coarser step the gauge's visual
-    // segment count would otherwise imply.
-    const onCounts = isStaticGaugeMode(opts.mode)
-      ? [0]
-      : Array.from({ length: 21 }, (_, i) => {
-        const pct = i * 5;
-        return opts.nSegs === 0 ? pct : Math.round((pct / 100) * opts.nSegs);
-      });
+    // Containers, labels, and images have no value, so they're a single
+    // static image; sensor gauges get the same frames InfoPanel export uses.
+    const onCounts = isStaticGaugeMode(opts.mode) ? [0] : frameSetOnCounts(opts.nSegs);
     const next: FrameData[] = [];
     // drawOn may resize the canvas (swapping width/height) for a
     // 90°/270°-rotated bar gauge; capture the actual size from the first

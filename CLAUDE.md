@@ -10,7 +10,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `npm run preview`: serve the production build
 - `npm run test`: Vitest, `src/**/*.test.ts`
 
-`npm run build` is the type check. Tests run in Node with no DOM or canvas, so they cover pure logic: file parsing and normalization, undo history, bundle import, and the AIDA64/InfoPanel markup and zip layout. Rendering is not tested; check it in the running app.
+`npm run build` is the type check. Tests run in Node with no DOM or canvas, so they cover pure logic: file parsing and normalization, undo history, bundle import, the AIDA64/InfoPanel markup and zip layout, frame stepping, and the multi-select layout actions in `lib/layout.ts`. Rendering is not tested; check it in the running app.
 
 ## What this is
 

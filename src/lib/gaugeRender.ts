@@ -1207,3 +1207,21 @@ export function drawOn(canvas: HTMLCanvasElement, onCount: number, opts: DrawOpt
 export function previewValueToOnCount(previewPct: number, nSegs: number): number {
   return nSegs === 0 ? previewPct : Math.round((previewPct / 100) * nSegs);
 }
+
+// onCount for frame `index` of `count` frames spaced evenly from empty to
+// full. Multiplying before the single division keeps exact halves (14 of 20
+// steps on 45 segments is 31.5) from drifting below .5 in floating point.
+export function frameOnCount(index: number, count: number, nSegs: number): number {
+  const steps = Math.max(1, count - 1);
+  return Math.round((index * (nSegs === 0 ? 100 : nSegs)) / steps);
+}
+
+// InfoPanel gauges and ExportBar's "Generate frame set" both use 21 frames at
+// 5%-of-sensor-value steps (0,5,...,100), independent of the gauge's own
+// segment count, so the displayed image updates every 5% of live value and
+// both exports animate through identical frames.
+export const FRAME_SET_COUNT = 21;
+
+export function frameSetOnCounts(nSegs: number): number[] {
+  return Array.from({ length: FRAME_SET_COUNT }, (_, i) => frameOnCount(i, FRAME_SET_COUNT, nSegs));
+}

@@ -1,9 +1,46 @@
 import { describe, expect, it } from 'vitest';
 import { JSZip } from './zip';
 import { DESIGN_SIDECAR_NAME } from './file';
-import { buildAidaPanelText, buildAidaZip, isDefaultedAidaSensorId, type AidaPanelSpec } from './aida64';
+import { aidaStateOnCounts, buildAidaPanelText, buildAidaZip, isDefaultedAidaSensorId, type AidaPanelSpec } from './aida64';
+import { frameOnCount, frameSetOnCounts, previewValueToOnCount } from './gaugeRender';
 import { buildInfoPanelXml, buildInfoPanelZip, type InfoPanelProfileSpec } from './infopanel';
 import { decodeAidaDefBytes, parseAidaPanelText, parseInfoPanelXml } from './importBundle';
+
+// The segment counts GaugePanel offers; 0 is a solid (percentage) gauge.
+const UI_SEGMENT_COUNTS = [0, 5, 8, 10, 12, 20, 50];
+
+describe('frame stepping', () => {
+  it('runs AIDA64 states from empty to full in 16 non-decreasing steps', () => {
+    for (const nSegs of UI_SEGMENT_COUNTS) {
+      const counts = aidaStateOnCounts(nSegs);
+      const full = nSegs === 0 ? 100 : nSegs;
+      expect(counts).toHaveLength(16);
+      expect(counts[0]).toBe(0);
+      expect(counts[15]).toBe(full);
+      expect(counts.every((c, i) => i === 0 || c >= counts[i - 1])).toBe(true);
+    }
+    expect(aidaStateOnCounts(0)).toEqual([0, 7, 13, 20, 27, 33, 40, 47, 53, 60, 67, 73, 80, 87, 93, 100]);
+  });
+
+  it('steps the 21-frame set every 5% of value', () => {
+    expect(frameSetOnCounts(0)).toEqual(Array.from({ length: 21 }, (_, i) => i * 5));
+    expect(frameSetOnCounts(20)).toEqual(Array.from({ length: 21 }, (_, i) => i));
+    expect(frameSetOnCounts(10).slice(0, 4)).toEqual([0, 1, 1, 2]);
+  });
+
+  it('rounds exact halves up instead of losing them to floating point', () => {
+    // 14 of 20 steps on 45 segments is exactly 31.5.
+    expect(frameOnCount(14, 21, 45)).toBe(32);
+    expect(frameOnCount(0, 1, 10)).toBe(0);
+  });
+
+  it('matches the single-PNG export at the same value for every UI segment count', () => {
+    for (const nSegs of UI_SEGMENT_COUNTS) {
+      const frames = frameSetOnCounts(nSegs);
+      frames.forEach((onCount, i) => expect(previewValueToOnCount(i * 5, nSegs)).toBe(onCount));
+    }
+  });
+});
 
 const stateFiles = Array.from({ length: 16 }, (_, i) => `cpu-${String(i).padStart(2, '0')}.png`);
 

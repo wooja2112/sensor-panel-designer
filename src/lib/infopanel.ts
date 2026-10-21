@@ -53,7 +53,7 @@
 // either, for the same reason — it's folded into the item's own <Name> as a
 // reminder of which sensor to pick, nothing more.
 import { renderBackground } from './backgroundRender';
-import { gaugeSensorRange, isStaticGaugeMode } from './gaugeRender';
+import { frameSetOnCounts, gaugeSensorRange, isStaticGaugeMode } from './gaugeRender';
 import type { ThemesMap } from './gaugeRender';
 import type { GaugeInstance, PanelConfig } from '../types';
 import { loadImage, preloadImages } from './imageCache';
@@ -80,22 +80,6 @@ async function canvasToPngBlob(canvas: HTMLCanvasElement): Promise<Blob> {
 
 function renderGauge(gauge: GaugeInstance, themes: ThemesMap, onCount: number): HTMLCanvasElement {
   return renderGaugeCanvas(gauge, themes, onCount);
-}
-
-// Always 21 frames at 5%-of-sensor-value steps (0,5,...,100), independent of
-// the gauge's own segment count, so InfoPanel's image-index selection
-// updates every 5% of live sensor value rather than only at whatever
-// coarser step the gauge's visual segment count would otherwise imply.
-// Same stepping as this app's own "Generate frame set" button (ExportBar.tsx)
-// so a gauge exported to InfoPanel animates through identical frames to what
-// you'd get downloading them individually.
-function frameOnCounts(gauge: GaugeInstance): number[] {
-  const opts = gauge.opts;
-  const counts: number[] = [];
-  for (let pct = 0; pct <= 100; pct += 5) {
-    counts.push(opts.nSegs === 0 ? pct : Math.round((pct / 100) * opts.nSegs));
-  }
-  return counts;
 }
 
 export interface BundleFile {
@@ -230,7 +214,7 @@ async function buildBundleParts(panel: PanelConfig, gauges: GaugeInstance[], the
       continue;
     }
 
-    const onCounts = frameOnCounts(gauge);
+    const onCounts = frameSetOnCounts(gauge.opts.nSegs);
     const frameFiles: string[] = [];
     // drawOn may resize the canvas (swapping width/height) for a
     // 90°/270°-rotated bar gauge; all frames of a gauge share the same

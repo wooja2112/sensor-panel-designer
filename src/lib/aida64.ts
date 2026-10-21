@@ -27,7 +27,7 @@
 // aidaSensorId falls back to SCPUUTI ("CPU Utilization", confirmed from the
 // same official template, a natural 0-100% metric) and is always enabled.
 import { renderBackground } from './backgroundRender';
-import { gaugeSensorRange, isStaticGaugeMode } from './gaugeRender';
+import { frameOnCount, gaugeSensorRange, isStaticGaugeMode } from './gaugeRender';
 import type { ThemesMap } from './gaugeRender';
 import type { GaugeInstance, PanelConfig } from '../types';
 import { loadImage, preloadImages } from './imageCache';
@@ -131,10 +131,8 @@ export function buildAidaPanelText(spec: AidaPanelSpec): string {
 // AIDA64 always divides a Custom gauge's MINVAL..MAXVAL span into exactly
 // 16 states, regardless of how many segments this app's own preview uses —
 // so state stepping here is independent of the gauge's nSegs.
-function onCountForState(gauge: GaugeInstance, state: number): number {
-  const frac = state / (AIDA_STATE_COUNT - 1);
-  const nSegs = gauge.opts.nSegs;
-  return nSegs === 0 ? Math.round(frac * 100) : Math.round(frac * nSegs);
+export function aidaStateOnCounts(nSegs: number): number[] {
+  return Array.from({ length: AIDA_STATE_COUNT }, (_, state) => frameOnCount(state, AIDA_STATE_COUNT, nSegs));
 }
 
 export interface BundleFile {
@@ -197,6 +195,7 @@ async function buildBundleParts(panel: PanelConfig, gauges: GaugeInstance[], the
     }
 
     const stateNames: string[] = [];
+    const stateOnCounts = aidaStateOnCounts(gauge.opts.nSegs);
     // drawOn may resize the canvas (swapping width/height) for a
     // 90°/270°-rotated bar gauge, so RESIZW/RESIZH/ITMX/ITMY below use the
     // *actual* rendered pixel size rather than gauge.width/height — otherwise
@@ -207,7 +206,7 @@ async function buildBundleParts(panel: PanelConfig, gauges: GaugeInstance[], the
     let renderedHeight = Math.round(gauge.height);
     for (let state = 0; state < AIDA_STATE_COUNT; state++) {
       onProgress?.(`Rendering "${gauge.name}" (${gaugeIndex}/${gauges.length}) — state ${state + 1}/${AIDA_STATE_COUNT}…`);
-      const canvas = renderGauge(gauge, themes, onCountForState(gauge, state));
+      const canvas = renderGauge(gauge, themes, stateOnCounts[state]);
       renderedWidth = canvas.width;
       renderedHeight = canvas.height;
       const name = uniqueName(`${slug}-${String(state).padStart(2, '0')}.png`);
