@@ -98,9 +98,9 @@ function frameOnCounts(gauge: GaugeInstance): number[] {
   return counts;
 }
 
-interface BundleFile {
+export interface BundleFile {
   name: string;
-  blob: Blob;
+  data: Blob | Uint8Array;
 }
 
 export type InfoPanelExportProgress = (message: string) => void;
@@ -111,9 +111,76 @@ function toProfileArgb(hexColor: string, transparent: boolean): string {
   return `#${transparent ? '00' : 'FF'}${h}`;
 }
 
+export type InfoPanelItem =
+  | { kind: 'image'; name: string; file: string; x: number; y: number; width: number; height: number }
+  | {
+    kind: 'gauge';
+    name: string;
+    sensorLabel: string;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    min: number;
+    max: number;
+    frameFiles: string[];
+  };
+
+export interface InfoPanelProfileSpec {
+  width: number;
+  height: number;
+  bgColor: string;
+  transparent: boolean;
+  backgroundFile: string;
+  items: InfoPanelItem[];
+}
+
+function infoPanelItemXml(item: InfoPanelItem): string {
+  const safeName = xmlEscapeText(item.name);
+  if (item.kind === 'image') {
+    return (
+      `<DisplayItem xsi:type="ImageDisplayItem"><Name>${safeName}</Name>` +
+      `<X>${item.x}</X><Y>${item.y}</Y>` +
+      `<Type>FILE</Type><FilePath>${item.file}</FilePath><RelativePath>true</RelativePath>` +
+      `<Width>${item.width}</Width><Height>${item.height}</Height></DisplayItem>`
+    );
+  }
+  const images = item.frameFiles.map((file, i) =>
+    `<ImageDisplayItem><Name>${safeName} ${i}</Name><Type>FILE</Type>` +
+    `<FilePath>${file}</FilePath><RelativePath>true</RelativePath></ImageDisplayItem>`,
+  );
+  const label = item.sensorLabel.trim();
+  const displayName = label ? `${safeName} (HWInfo: ${xmlEscapeText(label)})` : safeName;
+  return (
+    `<DisplayItem xsi:type="GaugeDisplayItem"><Name>${displayName}</Name>` +
+    `<X>${item.x}</X><Y>${item.y}</Y>` +
+    `<MinValue>${item.min}</MinValue><MaxValue>${item.max}</MaxValue>` +
+    `<Width>${item.width}</Width><Height>${item.height}</Height>` +
+    `<Images>${images.join('')}</Images></DisplayItem>`
+  );
+}
+
+export function buildInfoPanelXml(spec: InfoPanelProfileSpec): { profileXml: string; displayItemsXml: string } {
+  const background: InfoPanelItem = {
+    kind: 'image', name: 'Background', file: spec.backgroundFile, x: 0, y: 0, width: spec.width, height: spec.height,
+  };
+  const xsiNs = ' xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema"';
+  const displayItemsXml =
+    `<?xml version="1.0" encoding="utf-8"?>\r\n` +
+    `<ArrayOfDisplayItem${xsiNs}>${[background, ...spec.items].map(infoPanelItemXml).join('')}</ArrayOfDisplayItem>`;
+  const profileXml =
+    `<?xml version="1.0" encoding="utf-8"?>\r\n` +
+    `<Profile${xsiNs}>` +
+    `<Name>Sensor Panel Designer Export</Name>` +
+    `<Width>${spec.width}</Width><Height>${spec.height}</Height>` +
+    `<BackgroundColor>${toProfileArgb(spec.bgColor, spec.transparent)}</BackgroundColor>` +
+    `</Profile>`;
+  return { profileXml, displayItemsXml };
+}
+
 async function buildBundleParts(panel: PanelConfig, gauges: GaugeInstance[], themes: ThemesMap, onProgress?: InfoPanelExportProgress) {
   const files: BundleFile[] = [];
-  const items: string[] = [];
+  const items: InfoPanelItem[] = [];
   const usedNames = new Set<string>();
 
   function uniqueName(base: string): string {
@@ -138,36 +205,33 @@ async function buildBundleParts(panel: PanelConfig, gauges: GaugeInstance[], the
   bgCanvas.height = Math.max(1, Math.round(panel.height));
   renderBackground(bgCanvas.getContext('2d')!, bgCanvas.width, bgCanvas.height, panel.background);
   const bgName = uniqueName('background.png');
-  files.push({ name: bgName, blob: await canvasToPngBlob(bgCanvas) });
-  items.push(
-    `<DisplayItem xsi:type="ImageDisplayItem"><Name>Background</Name><X>0</X><Y>0</Y>` +
-    `<Type>FILE</Type><FilePath>${bgName}</FilePath><RelativePath>true</RelativePath>` +
-    `<Width>${bgCanvas.width}</Width><Height>${bgCanvas.height}</Height></DisplayItem>`,
-  );
+  files.push({ name: bgName, data: await canvasToPngBlob(bgCanvas) });
 
   let anon = 1;
   let gaugeIndex = 0;
   for (const gauge of gauges) {
     gaugeIndex++;
     const slug = slugify(gauge.name, `gauge-${anon++}`);
-    const safeName = xmlEscapeText(gauge.name);
 
     if (isStaticGaugeMode(gauge.opts.mode)) {
       onProgress?.(`Rendering "${gauge.name}" (${gaugeIndex}/${gauges.length})…`);
       const canvas = renderGauge(gauge, themes, 0);
       const name = uniqueName(`${slug}.png`);
-      files.push({ name, blob: await canvasToPngBlob(canvas) });
-      items.push(
-        `<DisplayItem xsi:type="ImageDisplayItem"><Name>${safeName}</Name>` +
-        `<X>${Math.round(gauge.x)}</X><Y>${Math.round(gauge.y)}</Y>` +
-        `<Type>FILE</Type><FilePath>${name}</FilePath><RelativePath>true</RelativePath>` +
-        `<Width>${Math.round(gauge.width)}</Width><Height>${Math.round(gauge.height)}</Height></DisplayItem>`,
-      );
+      files.push({ name, data: await canvasToPngBlob(canvas) });
+      items.push({
+        kind: 'image',
+        name: gauge.name,
+        file: name,
+        x: Math.round(gauge.x),
+        y: Math.round(gauge.y),
+        width: Math.round(gauge.width),
+        height: Math.round(gauge.height),
+      });
       continue;
     }
 
     const onCounts = frameOnCounts(gauge);
-    const imageItems: string[] = [];
+    const frameFiles: string[] = [];
     // drawOn may resize the canvas (swapping width/height) for a
     // 90°/270°-rotated bar gauge; all frames of a gauge share the same
     // size, so any one canvas's dimensions after rendering are
@@ -180,11 +244,8 @@ async function buildBundleParts(panel: PanelConfig, gauges: GaugeInstance[], the
       renderedWidth = canvas.width;
       renderedHeight = canvas.height;
       const name = uniqueName(`${slug}-${String(i).padStart(2, '0')}.png`);
-      files.push({ name, blob: await canvasToPngBlob(canvas) });
-      imageItems.push(
-        `<ImageDisplayItem><Name>${safeName} ${i}</Name><Type>FILE</Type>` +
-        `<FilePath>${name}</FilePath><RelativePath>true</RelativePath></ImageDisplayItem>`,
-      );
+      files.push({ name, data: await canvasToPngBlob(canvas) });
+      frameFiles.push(name);
     }
 
     // Declared Width/Height use the *actual* rendered pixel size (not
@@ -193,33 +254,49 @@ async function buildBundleParts(panel: PanelConfig, gauges: GaugeInstance[], the
     // gauge's original bounding box to match compose.ts's placement.
     const itemX = Math.round(gauge.x + gauge.width / 2 - renderedWidth / 2);
     const itemY = Math.round(gauge.y + gauge.height / 2 - renderedHeight / 2);
-    const label = gauge.hwinfoSensorLabel.trim();
-    const displayName = label ? `${safeName} (HWInfo: ${xmlEscapeText(label)})` : safeName;
     const range = gaugeSensorRange(gauge.opts);
-    items.push(
-      `<DisplayItem xsi:type="GaugeDisplayItem"><Name>${displayName}</Name>` +
-      `<X>${itemX}</X><Y>${itemY}</Y>` +
-      `<MinValue>${range.min}</MinValue><MaxValue>${range.max}</MaxValue>` +
-      `<Width>${renderedWidth}</Width><Height>${renderedHeight}</Height>` +
-      `<Images>${imageItems.join('')}</Images></DisplayItem>`,
-    );
+    items.push({
+      kind: 'gauge',
+      name: gauge.name,
+      sensorLabel: gauge.hwinfoSensorLabel,
+      x: itemX,
+      y: itemY,
+      width: renderedWidth,
+      height: renderedHeight,
+      min: range.min,
+      max: range.max,
+      frameFiles,
+    });
   }
 
-  const xsiNs = ' xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema"';
-  const displayItemsXml =
-    `<?xml version="1.0" encoding="utf-8"?>\r\n` +
-    `<ArrayOfDisplayItem${xsiNs}>${items.join('')}</ArrayOfDisplayItem>`;
-
-  const bgColor = panel.background.transparentBackground ? '#ffffff' : panel.background.color;
-  const profileXml =
-    `<?xml version="1.0" encoding="utf-8"?>\r\n` +
-    `<Profile${xsiNs}>` +
-    `<Name>Sensor Panel Designer Export</Name>` +
-    `<Width>${bgCanvas.width}</Width><Height>${bgCanvas.height}</Height>` +
-    `<BackgroundColor>${toProfileArgb(bgColor, panel.background.transparentBackground)}</BackgroundColor>` +
-    `</Profile>`;
+  const { profileXml, displayItemsXml } = buildInfoPanelXml({
+    width: bgCanvas.width,
+    height: bgCanvas.height,
+    bgColor: panel.background.transparentBackground ? '#ffffff' : panel.background.color,
+    transparent: panel.background.transparentBackground,
+    backgroundFile: bgName,
+    items,
+  });
 
   return { profileXml, displayItemsXml, files };
+}
+
+export function buildInfoPanelZip(
+  xml: { profileXml: string; displayItemsXml: string }, sidecarJson: string, files: BundleFile[],
+): JSZip {
+  const zip = new JSZip();
+  zip.file('Profile.xml', xml.profileXml);
+  zip.file('DisplayItems.xml', xml.displayItemsXml);
+  zip.file(DESIGN_SIDECAR_NAME, sidecarJson);
+  // Backslash, not forward slash — see the file-level comment above; this is
+  // the one thing InfoPanel's own ImportProfile (at least as of v1.3.1)
+  // requires that isn't standard zip convention. createFolders:false also
+  // still matters: JSZip auto-creates a real "assets\" directory entry
+  // otherwise, and InfoPanel's ImportProfile would try to ExtractToFile that
+  // placeholder as if it were a real asset, throwing and aborting the loop
+  // before any real asset gets written to disk.
+  for (const f of files) zip.file(`assets\\${f.name}`, f.data, { createFolders: false });
+  return zip;
 }
 
 export async function downloadInfoPanelBundle(
@@ -228,18 +305,7 @@ export async function downloadInfoPanelBundle(
   const { profileXml, displayItemsXml, files } = await buildBundleParts(panel, gauges, themes, onProgress);
 
   onProgress?.(`Packaging .infopanel (${files.length + 2} files)…`);
-  const zip = new JSZip();
-  zip.file('Profile.xml', profileXml);
-  zip.file('DisplayItems.xml', displayItemsXml);
-  zip.file(DESIGN_SIDECAR_NAME, serializePanelFile(panel, gauges, themes));
-  // Backslash, not forward slash — see the file-level comment above; this is
-  // the one thing InfoPanel's own ImportProfile (at least as of v1.3.1)
-  // requires that isn't standard zip convention. createFolders:false also
-  // still matters: JSZip auto-creates a real "assets\" directory entry
-  // otherwise, and InfoPanel's ImportProfile would try to ExtractToFile that
-  // placeholder as if it were a real asset, throwing and aborting the loop
-  // before any real asset gets written to disk.
-  for (const f of files) zip.file(`assets\\${f.name}`, f.blob, { createFolders: false });
+  const zip = buildInfoPanelZip({ profileXml, displayItemsXml }, serializePanelFile(panel, gauges, themes), files);
 
   // Same reasoning as the AIDA64 exporter: PNGs are already compressed, so
   // DEFLATE-recompressing them in pure JS wastes time for no size benefit.

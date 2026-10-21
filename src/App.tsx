@@ -42,6 +42,7 @@ export default function App() {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [showDesigner, setShowDesigner] = useState(false);
   const [restoredBannerDismissed, setRestoredBannerDismissed] = useState(false);
+  const [autosaveFailed, setAutosaveFailed] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const selectedId = selectedIds[0] ?? null;
@@ -137,7 +138,7 @@ export default function App() {
   // Debounced so a drag/resize (many state updates per second) doesn't hit
   // localStorage — a synchronous API — on every single pointermove.
   useEffect(() => {
-    const t = setTimeout(() => saveAutosave(panel, gauges, themes), 400);
+    const t = setTimeout(() => setAutosaveFailed(!saveAutosave(panel, gauges, themes)), 400);
     return () => clearTimeout(t);
   }, [panel, gauges, themes]);
 
@@ -343,6 +344,11 @@ export default function App() {
             <button type="button" onClick={startFresh} className="underline hover:text-foreground cursor-pointer">start fresh</button>
             {' '}·{' '}
             <button type="button" onClick={() => setRestoredBannerDismissed(true)} className="underline hover:text-foreground cursor-pointer">dismiss</button>
+          </span>
+        )}
+        {autosaveFailed && (
+          <span className="text-[11px] text-destructive" role="status">
+            · couldn't autosave to browser storage — use Save project to keep this design
           </span>
         )}
         <div className="ml-auto flex gap-2">

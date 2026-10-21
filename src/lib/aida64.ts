@@ -73,6 +73,61 @@ function renderGauge(gauge: GaugeInstance, themes: ThemesMap, onCount: number): 
   return renderGaugeCanvas(gauge, themes, onCount);
 }
 
+export type AidaItem =
+  | { kind: 'image'; file: string; x: number; y: number; width: number; height: number }
+  | {
+    kind: 'gauge';
+    // Raw user input; sanitized here, and blank falls back to SCPUUTI.
+    sensorId: string;
+    label: string;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    min: number;
+    max: number;
+    stateFiles: string[];
+  };
+
+export interface AidaPanelSpec {
+  width: number;
+  height: number;
+  bgColor: string;
+  backgroundFile: string;
+  items: AidaItem[];
+}
+
+export function isDefaultedAidaSensorId(sensorId: string): boolean {
+  return !sanitizeSensorId(sensorId);
+}
+
+function aidaItemLine(item: AidaItem): string {
+  if (item.kind === 'image') {
+    return (
+      `<ID>IMG</ID><BGIMG>0</BGIMG><RESIZW>${item.width}</RESIZW><RESIZH>${item.height}</RESIZH>` +
+      `<ITMX>${item.x}</ITMX><ITMY>${item.y}</ITMY><IMGFIL>${item.file}</IMGFIL>`
+    );
+  }
+  const idTag = `[GAUGE]${sanitizeSensorId(item.sensorId) || DEFAULT_SENSOR_ID}`;
+  return (
+    `<ID>${idTag}</ID><LBL>${sanitizeTagText(item.label)}</LBL><TYP>Custom</TYP><SIZ>S</SIZ>` +
+    `<RESIZW>${item.width}</RESIZW><RESIZH>${item.height}</RESIZH>` +
+    `<MINVAL>${item.min}</MINVAL><MAXVAL>${item.max}</MAXVAL><SHWICO>0</SHWICO><SHWVAL>0</SHWVAL>` +
+    `<TXTSIZ>12</TXTSIZ><FNTNAM>Segoe UI</FNTNAM><VALCOL>16777215</VALCOL><VALBI>00</VALBI>` +
+    `<ITMX>${item.x}</ITMX><ITMY>${item.y}</ITMY><STAFLS>${item.stateFiles.join('|')}</STAFLS>`
+  );
+}
+
+export function buildAidaPanelText(spec: AidaPanelSpec): string {
+  const lines = [
+    `<SPVER>200</SPVER><SWVER>Sensor Panel Designer</SWVER>`,
+    `<SPWIDTH>${spec.width}</SPWIDTH><SPHEIGHT>${spec.height}</SPHEIGHT><SPBGCOLOR>${hexToColorRef(spec.bgColor)}</SPBGCOLOR>`,
+    `<ID>IMG</ID><BGIMG>1</BGIMG><ITMX>0</ITMX><ITMY>0</ITMY><IMGFIL>${spec.backgroundFile}</IMGFIL>`,
+    ...spec.items.map(aidaItemLine),
+  ];
+  return lines.join('\r\n') + '\r\n';
+}
+
 // AIDA64 always divides a Custom gauge's MINVAL..MAXVAL span into exactly
 // 16 states, regardless of how many segments this app's own preview uses —
 // so state stepping here is independent of the gauge's nSegs.
@@ -82,16 +137,16 @@ function onCountForState(gauge: GaugeInstance, state: number): number {
   return nSegs === 0 ? Math.round(frac * 100) : Math.round(frac * nSegs);
 }
 
-interface BundleFile {
+export interface BundleFile {
   name: string;
-  blob: Blob;
+  data: Blob | Uint8Array;
 }
 
 export type Aida64ExportProgress = (message: string) => void;
 
 async function buildBundleParts(panel: PanelConfig, gauges: GaugeInstance[], themes: ThemesMap, onProgress?: Aida64ExportProgress) {
   const files: BundleFile[] = [];
-  const items: string[] = [];
+  const items: AidaItem[] = [];
   const usedNames = new Set<string>();
   const defaultedGaugeNames: string[] = [];
 
@@ -117,8 +172,7 @@ async function buildBundleParts(panel: PanelConfig, gauges: GaugeInstance[], the
   bgCanvas.height = Math.max(1, Math.round(panel.height));
   renderBackground(bgCanvas.getContext('2d')!, bgCanvas.width, bgCanvas.height, panel.background);
   const bgName = uniqueName('background.png');
-  files.push({ name: bgName, blob: await canvasToPngBlob(bgCanvas) });
-  items.push(`<ID>IMG</ID><BGIMG>1</BGIMG><ITMX>0</ITMX><ITMY>0</ITMY><IMGFIL>${bgName}</IMGFIL>`);
+  files.push({ name: bgName, data: await canvasToPngBlob(bgCanvas) });
 
   let anon = 1;
   let gaugeIndex = 0;
@@ -130,11 +184,15 @@ async function buildBundleParts(panel: PanelConfig, gauges: GaugeInstance[], the
       onProgress?.(`Rendering "${gauge.name}" (${gaugeIndex}/${gauges.length})…`);
       const canvas = renderGauge(gauge, themes, 0);
       const name = uniqueName(`${slug}.png`);
-      files.push({ name, blob: await canvasToPngBlob(canvas) });
-      items.push(
-        `<ID>IMG</ID><BGIMG>0</BGIMG><RESIZW>${Math.round(gauge.width)}</RESIZW><RESIZH>${Math.round(gauge.height)}</RESIZH>` +
-        `<ITMX>${Math.round(gauge.x)}</ITMX><ITMY>${Math.round(gauge.y)}</ITMY><IMGFIL>${name}</IMGFIL>`,
-      );
+      files.push({ name, data: await canvasToPngBlob(canvas) });
+      items.push({
+        kind: 'image',
+        file: name,
+        x: Math.round(gauge.x),
+        y: Math.round(gauge.y),
+        width: Math.round(gauge.width),
+        height: Math.round(gauge.height),
+      });
       continue;
     }
 
@@ -153,7 +211,7 @@ async function buildBundleParts(panel: PanelConfig, gauges: GaugeInstance[], the
       renderedWidth = canvas.width;
       renderedHeight = canvas.height;
       const name = uniqueName(`${slug}-${String(state).padStart(2, '0')}.png`);
-      files.push({ name, blob: await canvasToPngBlob(canvas) });
+      files.push({ name, data: await canvasToPngBlob(canvas) });
       stateNames.push(name);
     }
 
@@ -162,31 +220,36 @@ async function buildBundleParts(panel: PanelConfig, gauges: GaugeInstance[], the
     const itmX = Math.round(gauge.x + gauge.width / 2 - renderedWidth / 2);
     const itmY = Math.round(gauge.y + gauge.height / 2 - renderedHeight / 2);
 
-    const explicitId = sanitizeSensorId(gauge.aidaSensorId);
-    if (!explicitId) defaultedGaugeNames.push(gauge.name);
-    const idTag = `[GAUGE]${explicitId || DEFAULT_SENSOR_ID}`;
+    if (isDefaultedAidaSensorId(gauge.aidaSensorId)) defaultedGaugeNames.push(gauge.name);
     const range = gaugeSensorRange(gauge.opts);
-    items.push(
-      `<ID>${idTag}</ID><LBL>${sanitizeTagText(gauge.name)}</LBL><TYP>Custom</TYP><SIZ>S</SIZ>` +
-      `<RESIZW>${renderedWidth}</RESIZW><RESIZH>${renderedHeight}</RESIZH>` +
-      `<MINVAL>${range.min}</MINVAL><MAXVAL>${range.max}</MAXVAL><SHWICO>0</SHWICO><SHWVAL>0</SHWVAL>` +
-      `<TXTSIZ>12</TXTSIZ><FNTNAM>Segoe UI</FNTNAM><VALCOL>16777215</VALCOL><VALBI>00</VALBI>` +
-      `<ITMX>${itmX}</ITMX><ITMY>${itmY}</ITMY><STAFLS>${stateNames.join('|')}</STAFLS>`,
-    );
+    items.push({
+      kind: 'gauge',
+      sensorId: gauge.aidaSensorId,
+      label: gauge.name,
+      x: itmX,
+      y: itmY,
+      width: renderedWidth,
+      height: renderedHeight,
+      min: range.min,
+      max: range.max,
+      stateFiles: stateNames,
+    });
   }
 
-  const bgColor = panel.background.transparentBackground ? '#ffffff' : panel.background.color;
-  const header =
-    `<SPVER>200</SPVER><SWVER>Sensor Panel Designer</SWVER>\r\n` +
-    `<SPWIDTH>${bgCanvas.width}</SPWIDTH><SPHEIGHT>${bgCanvas.height}</SPHEIGHT><SPBGCOLOR>${hexToColorRef(bgColor)}</SPBGCOLOR>\r\n`;
-  const defText = header + items.join('\r\n') + '\r\n';
+  const defText = buildAidaPanelText({
+    width: bgCanvas.width,
+    height: bgCanvas.height,
+    bgColor: panel.background.transparentBackground ? '#ffffff' : panel.background.color,
+    backgroundFile: bgName,
+    items,
+  });
 
   return { defText, files, defaultedGaugeNames };
 }
 
 // AIDA64's own exports are UTF-16LE with a BOM; matching that byte-for-byte
 // rather than guessing UTF-8 would also be accepted.
-function toUtf16LEBytes(text: string): Uint8Array {
+export function toUtf16LEBytes(text: string): Uint8Array {
   const buf = new Uint8Array(2 + text.length * 2);
   buf[0] = 0xff;
   buf[1] = 0xfe;
@@ -198,16 +261,21 @@ function toUtf16LEBytes(text: string): Uint8Array {
   return buf;
 }
 
+export function buildAidaZip(defText: string, sidecarJson: string, files: BundleFile[]): JSZip {
+  const zip = new JSZip();
+  zip.file('panel.sp2', toUtf16LEBytes(defText));
+  zip.file(DESIGN_SIDECAR_NAME, sidecarJson);
+  for (const f of files) zip.file(f.name, f.data);
+  return zip;
+}
+
 export async function downloadAida64Bundle(
   panel: PanelConfig, gauges: GaugeInstance[], themes: ThemesMap, filename: string, onProgress?: Aida64ExportProgress,
 ): Promise<{ defaultedGaugeNames: string[] }> {
   const { defText, files, defaultedGaugeNames } = await buildBundleParts(panel, gauges, themes, onProgress);
 
   onProgress?.(`Packaging .spzip (${files.length + 1} files)…`);
-  const zip = new JSZip();
-  zip.file('panel.sp2', toUtf16LEBytes(defText));
-  zip.file(DESIGN_SIDECAR_NAME, serializePanelFile(panel, gauges, themes));
-  for (const f of files) zip.file(f.name, f.blob);
+  const zip = buildAidaZip(defText, serializePanelFile(panel, gauges, themes), files);
 
   // PNGs are already compressed — DEFLATE-recompressing them buys almost
   // nothing but costs real time in JSZip's pure-JS deflate, so store them

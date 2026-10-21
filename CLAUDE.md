@@ -8,8 +8,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `npm run build`: type-check (`tsc -b`), then Vite build
 - `npm run lint`: oxlint (config in `.oxlintrc.json`)
 - `npm run preview`: serve the production build
+- `npm run test`: Vitest, `src/**/*.test.ts`
 
-There is no test suite. `npm run build` is the type check.
+`npm run build` is the type check. Tests run in Node with no DOM or canvas, so they cover pure logic: file parsing and normalization, undo history, bundle import, and the AIDA64/InfoPanel markup and zip layout. Rendering is not tested; check it in the running app.
 
 ## What this is
 
@@ -37,7 +38,7 @@ There is no backend.
 - **Ring-gauge sizing.** For `circ` and `needle`, "same size" means the same visual ring radius, not the same box. See `computeGaugeOuterRadius` and `solveRingBoxForOuterRadius`.
 
 **Persistence (`lib/file.ts`)**
-- State autosaves to localStorage with a debounce.
+- State autosaves to localStorage with a debounce. `saveAutosave` returns false on a storage failure, and `App.tsx` shows a warning in the header.
 - Save/load uses the same JSON shape (`SensorPanelFile`, `SENSOR_PANEL_FILE_VERSION`).
 - When you add a field to `GaugeInstance`, backfill it in `normalizeGauge()` so older files and autosaves still load.
 - Background images are stored as data URLs, so they serialize with everything else. `imageCache.ts` decodes them once so `renderBackground` can stay synchronous. It also downscales uploads to stay under the localStorage quota.
@@ -45,5 +46,7 @@ There is no backend.
 **Exporters (`lib/aida64.ts`, `lib/infopanel.ts`)** produce third-party formats that were reverse-engineered. The long header comments in each file record verified format details. Read them before changing anything there:
 - **AIDA64:** the file is UTF-16LE with a BOM. Colors are COLORREF (BGR). Each gauge has exactly 16 state images. Disabled items are hidden, so unbound gauges default to sensor `SCPUUTI`.
 - **InfoPanel:** it is .NET XmlSerializer XML. Asset paths inside the zip must use backslashes (`assets\name.png`).
+
+Each exporter renders frames on canvas, then hands plain item records to a pure builder (`buildAidaPanelText`/`buildAidaZip`, `buildInfoPanelXml`/`buildInfoPanelZip`). Format changes belong in the builders, which `exporters.test.ts` covers.
 
 Each gauge's exports are pre-rendered frame images (AIDA64 states, InfoPanel images, ExportBar's 21-frame set). Gauges never draw live in the target app. `jszip` is statically imported from `lib/zip.ts` (a dynamic `import('jszip')` 404s in Vite after a dep re-optimize).

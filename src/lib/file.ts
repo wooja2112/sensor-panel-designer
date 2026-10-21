@@ -49,7 +49,7 @@ export function parsePanelFile(json: string): SensorPanelFile {
     version: SENSOR_PANEL_FILE_VERSION,
     panel: normalizePanel(file.panel),
     gauges: file.gauges.map(g => normalizeGauge(g && typeof g === 'object' ? g : {})),
-    themes: normalizeThemes(file.themes as ThemesMap),
+    themes: normalizeThemes(file.themes),
   };
 }
 
@@ -71,12 +71,15 @@ export function downloadPanelFile(panel: PanelConfig, gauges: GaugeInstance[], t
 // (parsePanelFile throws, caught below) rather than crash the app on load.
 const AUTOSAVE_KEY = 'sensorPanelDesigner.autosave.v1';
 
-export function saveAutosave(panel: PanelConfig, gauges: GaugeInstance[], themes: ThemesMap) {
+// Returns false when storage is full, disabled, or unavailable (e.g. private
+// browsing). Data-URL images live in this same JSON, so a few large ones can
+// exceed the quota — the caller tells the user to save the project instead.
+export function saveAutosave(panel: PanelConfig, gauges: GaugeInstance[], themes: ThemesMap): boolean {
   try {
     localStorage.setItem(AUTOSAVE_KEY, serializePanelFile(panel, gauges, themes));
+    return true;
   } catch {
-    // Storage full, disabled, or unavailable (e.g. private browsing) —
-    // autosave is a convenience, not a requirement, so fail silently.
+    return false;
   }
 }
 

@@ -21,6 +21,8 @@ export function useDesignHistory(
 
   const applyRef = useRef(apply);
   applyRef.current = apply;
+  const selectedIdsRef = useRef(selectedIds);
+  selectedIdsRef.current = selectedIds;
 
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
@@ -33,9 +35,11 @@ export function useDesignHistory(
 
   // Record design edits before touchSelection so a combined change
   // (e.g. delete + clear selection) pushes the *previous* selection
-  // onto the undo stack instead of the already-cleared one.
+  // onto the undo stack instead of the already-cleared one. Selection is read
+  // through a ref so a selection-only change never records an undo step;
+  // touchSelection below keeps the present snapshot's selection current.
   useEffect(() => {
-    historyRef.current!.onChange({ panel, gauges, themes, selectedIds });
+    historyRef.current!.onChange({ panel, gauges, themes, selectedIds: selectedIdsRef.current });
     syncButtons();
     const t = setTimeout(() => historyRef.current!.endCoalesce(), DESIGN_HISTORY_COALESCE_MS);
     return () => clearTimeout(t);

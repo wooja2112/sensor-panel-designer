@@ -1,6 +1,6 @@
 import type { BackgroundOptions } from './lib/backgroundRender';
 import { defaultBackgroundOptions } from './lib/backgroundRender';
-import type { DrawOptions, GaugeMode, ThemesMap } from './lib/gaugeRender';
+import type { DrawOptions, GaugeMode, ThemeColors, ThemesMap } from './lib/gaugeRender';
 import { DEFAULT_THEMES, defaultDrawOptions, defaultSizeForMode } from './lib/gaugeRender';
 import { sanitizeImageSrc } from './lib/imageCache';
 
@@ -144,11 +144,29 @@ export function normalizePanel(panel: Partial<PanelConfig> & { background?: Part
   };
 }
 
-export function normalizeThemes(themes: ThemesMap | undefined | null): ThemesMap {
-  if (!themes || typeof themes !== 'object' || Array.isArray(themes) || Object.keys(themes).length === 0) {
+function isColorTriple(value: unknown): value is [string, string, string] {
+  return Array.isArray(value) && value.length === 3 && value.every(c => typeof c === 'string');
+}
+
+// Loaded files are trusted for shape only as far as this checks: a theme
+// missing zone/mono/solid would otherwise throw inside drawOn on next paint,
+// so bad fields are repaired from the classic theme and keys are kept.
+export function normalizeThemes(themes: unknown): ThemesMap {
+  if (!themes || typeof themes !== 'object' || Array.isArray(themes)) {
     return structuredClone(DEFAULT_THEMES);
   }
-  return themes;
+  const fallback = DEFAULT_THEMES.classic;
+  const out: ThemesMap = {};
+  for (const [key, raw] of Object.entries(themes)) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
+    const theme = raw as Partial<Record<keyof ThemeColors, unknown>>;
+    out[key] = {
+      zone: isColorTriple(theme.zone) ? [...theme.zone] : [...fallback.zone],
+      mono: isColorTriple(theme.mono) ? [...theme.mono] : [...fallback.mono],
+      solid: typeof theme.solid === 'string' ? theme.solid : fallback.solid,
+    };
+  }
+  return Object.keys(out).length > 0 ? out : structuredClone(DEFAULT_THEMES);
 }
 
 // A gauge instance stores a themeKey (a reference into the shared, editable

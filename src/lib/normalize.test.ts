@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { barCanvasIsSwapped, defaultDrawOptions, gaugeSensorRange } from './gaugeRender';
+import { DEFAULT_THEMES, barCanvasIsSwapped, defaultDrawOptions, gaugeSensorRange } from './gaugeRender';
 import { isAllowedImageSrc, sanitizeImageSrc } from './imageCache';
 import { parseIntegerInput, parseNumberInput } from './number';
 import { parsePanelFile } from './file';
-import { cloneGaugeInstance, normalizeGauge, remapThemeKeys } from '../types';
+import { cloneGaugeInstance, normalizeGauge, normalizeThemes, remapThemeKeys } from '../types';
 
 describe('parseNumberInput', () => {
   it('keeps negatives instead of coercing them to the fallback', () => {
@@ -116,6 +116,25 @@ describe('gaugeSensorRange', () => {
     expect(gaugeSensorRange(classic)).toEqual({ min: 0, max: 8000 });
     expect(gaugeSensorRange(defaultDrawOptions('bar'))).toEqual({ min: 0, max: 100 });
     expect(gaugeSensorRange(defaultDrawOptions('circ'))).toEqual({ min: 0, max: 100 });
+  });
+});
+
+describe('normalizeThemes', () => {
+  it('repairs malformed theme fields and keeps their keys', () => {
+    const themes = normalizeThemes({
+      custom: { zone: ['#111', '#222'], mono: 'nope', solid: 5 },
+      good: { zone: ['#1', '#2', '#3'], mono: ['#4', '#5', '#6'], solid: '#7' },
+      broken: null,
+    });
+    expect(Object.keys(themes)).toEqual(['custom', 'good']);
+    expect(themes.custom).toEqual(DEFAULT_THEMES.classic);
+    expect(themes.good).toEqual({ zone: ['#1', '#2', '#3'], mono: ['#4', '#5', '#6'], solid: '#7' });
+  });
+
+  it('falls back to the built-in themes when nothing usable is left', () => {
+    expect(normalizeThemes({ only: 'string' })).toEqual(DEFAULT_THEMES);
+    expect(normalizeThemes([])).toEqual(DEFAULT_THEMES);
+    expect(normalizeThemes(null)).toEqual(DEFAULT_THEMES);
   });
 });
 

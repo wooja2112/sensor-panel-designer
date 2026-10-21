@@ -23,7 +23,7 @@ npm run dev
 
 | Extension | Role |
 | --- | --- |
-| `.sensorpaneldesign` | This app's project file. Save and Open use it. The session also autosaves to localStorage. |
+| `.sensorpaneldesign` | This app's project file. Save and Open use it. The session also autosaves to localStorage; if large images fill the browser's storage, the header says so and Save project is the only copy. |
 | PNG | The whole panel, one gauge, or a zip of gauge frames. |
 | `.spzip` | AIDA64 SensorPanel bundle. Unbound gauges export as CPU Utilization (`SCPUUTI`) so they stay visible; rebind them in AIDA64. |
 | `.infopanel` | InfoPanel profile. Gauges are unbound because those sensor ids are machine-specific; bind them in InfoPanel after import. |
