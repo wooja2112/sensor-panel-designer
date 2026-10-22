@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { GaugeInstance, PanelConfig } from './types';
-import { cloneGaugeInstance, createGaugeInstance, defaultPanelConfig, remapThemeKeys } from './types';
+import { cloneGaugeInstance, createGaugeInstance, newDesignPanelConfig, remapThemeKeys } from './types';
 import type { BackgroundOptions } from './lib/backgroundRender';
 import type { DrawOptions, GaugeMode, ThemesMap } from './lib/gaugeRender';
 import { DEFAULT_THEMES } from './lib/gaugeRender';
@@ -32,7 +32,7 @@ export default function App() {
   if (autosaveRef.current === undefined) autosaveRef.current = loadAutosave();
   const autosave = autosaveRef.current;
 
-  const [panel, setPanel] = useState<PanelConfig>(() => autosave?.panel ?? defaultPanelConfig());
+  const [panel, setPanel] = useState<PanelConfig>(() => autosave?.panel ?? newDesignPanelConfig());
   const [gauges, setGauges] = useState<GaugeInstance[]>(() => autosave?.gauges ?? []);
   const [themes, setThemes] = useState<ThemesMap>(() => autosave?.themes ?? structuredClone(DEFAULT_THEMES));
   // Ordered so the first entry is the anchor gauge for multi-select actions
@@ -93,7 +93,7 @@ export default function App() {
   const startFresh = useCallback(() => {
     clearAutosave();
     replace({
-      panel: defaultPanelConfig(),
+      panel: newDesignPanelConfig(),
       gauges: [],
       themes: structuredClone(DEFAULT_THEMES),
       selectedIds: [],

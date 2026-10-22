@@ -190,3 +190,9 @@ export function defaultPanelConfig(): PanelConfig {
     background: defaultBackgroundOptions(),
   };
 }
+
+// The size a brand-new design starts at. defaultPanelConfig() stays 480×320:
+// it's the fallback for files and bundles that omit a size.
+export function newDesignPanelConfig(): PanelConfig {
+  return { ...defaultPanelConfig(), width: 3840, height: 1100 };
+}
