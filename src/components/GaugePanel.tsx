@@ -490,7 +490,7 @@ export function GaugePanel({
 
       {(mode === 'circ' || mode === 'needle') && (
         <CtrlRow label={`Arc span — ${opts.arcSpan}°`}>
-          <SliderRow value={opts.arcSpan} min={90} max={300} step={5} nudgeStep={1} onChange={v => onChange({ arcSpan: v })} />
+          <SliderRow value={opts.arcSpan} min={90} max={360} step={5} nudgeStep={1} onChange={v => onChange({ arcSpan: v })} />
         </CtrlRow>
       )}
 

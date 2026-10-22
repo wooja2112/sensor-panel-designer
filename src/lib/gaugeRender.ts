@@ -971,7 +971,9 @@ export function drawOn(canvas: HTMLCanvasElement, onCount: number, opts: DrawOpt
     // ── circular gauge ──
     const { r, cx, cy, outerHalf } = computeGaugeLayout(W, H, opts, ctx);
 
-    const half = (180 - arcSpan) / 2, sd = 180 + half, ed = 360 + 180 - half;
+    // Centered on the top with the gap at the bottom, sweeping exactly
+    // arcSpan degrees.
+    const half = (180 - arcSpan) / 2, sd = 180 + half, ed = 360 - half;
     const span = ed - sd;
     const rotRad = opts.rotation * Math.PI / 180;
     const sdRad = sd * Math.PI / 180 + rotRad;
