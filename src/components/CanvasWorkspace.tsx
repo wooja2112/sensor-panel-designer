@@ -4,6 +4,8 @@ import type { ThemesMap } from '../lib/gaugeRender';
 import { designImageSrcs, renderPanel } from '../lib/compose';
 import { barCanvasIsSwapped } from '../lib/gaugeRender';
 import { getCachedImage, preloadImages } from '../lib/imageCache';
+import { MAX_CANVAS_SIZE } from '../types';
+import type { OpenMenu } from './ContextMenu';
 
 type Zoom = number | 'fit';
 
@@ -48,7 +50,7 @@ function boxSize(g: GaugeInstance): { width: number; height: number; swapped: bo
 }
 
 export function CanvasWorkspace({
-  panel, gauges, themes, selectedIds, onSelect, onMoveGauges, onResizeGauge,
+  panel, gauges, themes, selectedIds, onSelect, onMoveGauges, onResizeGauge, onOpenMenu,
 }: {
   panel: PanelConfig;
   gauges: GaugeInstance[];
@@ -57,6 +59,7 @@ export function CanvasWorkspace({
   onSelect: (id: string | null, additive?: boolean) => void;
   onMoveGauges: (moves: { id: string; x: number; y: number }[]) => void;
   onResizeGauge: (id: string, width: number, height: number) => void;
+  onOpenMenu: (menu: OpenMenu) => void;
 }) {
   const [zoom, setZoom] = useState<Zoom>('fit');
   const [available, setAvailable] = useState({ width: 600, height: 400 });
@@ -121,11 +124,8 @@ export function CanvasWorkspace({
         // axis, which is gauge.width — so dx/dy feed width/height swapped too.
         const dWidth = resize.swapped ? dy : dx;
         const dHeight = resize.swapped ? dx : dy;
-        onResizeGauge(
-          resize.id,
-          Math.max(MIN_GAUGE_SIZE, Math.round(resize.startWidth + dWidth)),
-          Math.max(MIN_GAUGE_SIZE, Math.round(resize.startHeight + dHeight)),
-        );
+        const size = (v: number) => Math.min(MAX_CANVAS_SIZE, Math.max(MIN_GAUGE_SIZE, Math.round(v)));
+        onResizeGauge(resize.id, size(resize.startWidth + dWidth), size(resize.startHeight + dHeight));
       }
     }
     function handleUp() {
@@ -178,6 +178,22 @@ export function CanvasWorkspace({
           className="relative flex-shrink-0"
           style={{ width: stageWidth, height: stageHeight }}
           onPointerDown={e => { if (e.target === e.currentTarget) onSelect(null); }}
+          onContextMenu={e => {
+            // Empty panel space: the menu adds gauges centered where it opened.
+            e.preventDefault();
+            onSelect(null);
+            const rect = e.currentTarget.getBoundingClientRect();
+            onOpenMenu({
+              clientX: e.clientX,
+              clientY: e.clientY,
+              target: {
+                kind: 'panel',
+                x: Math.round((e.clientX - rect.left) / scale),
+                y: Math.round((e.clientY - rect.top) / scale),
+                hasGauges: gauges.length > 0,
+              },
+            });
+          }}
         >
           <canvas
             ref={canvasRef}
@@ -204,8 +220,18 @@ export function CanvasWorkspace({
             return (
               <div
                 key={g.id}
+                onContextMenu={e => {
+                  // Right-click on an unselected gauge selects just it, like
+                  // most editors, so the menu always acts on what's highlighted.
+                  e.preventDefault();
+                  e.stopPropagation();
+                  if (!isSelected) onSelect(g.id, false);
+                  onOpenMenu({ clientX: e.clientX, clientY: e.clientY, target: { kind: 'gauges', count: isSelected ? selectedIds.length : 1 } });
+                }}
                 onPointerDown={e => {
                   e.stopPropagation();
+                  // Only the primary button drags; a right-click opens the menu.
+                  if (e.button !== 0) return;
                   const additive = e.shiftKey || e.ctrlKey || e.metaKey;
                   if (additive) {
                     onSelect(g.id, true);

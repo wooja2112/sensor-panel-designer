@@ -8,7 +8,7 @@ import type { ThemesMap } from './gaugeRender';
 import type { GaugeInstance } from '../types';
 import { resolveDrawOptions } from '../types';
 import { getCachedImage } from './imageCache';
-import { measureImportedText } from './importedText';
+import { importedTextFromOpts, measureImportedText, rotatedBounds } from './importedText';
 
 const ALPHA_THRESHOLD = 8; // ignores near-invisible antialiasing fringe
 
@@ -20,15 +20,17 @@ export function fitGaugeToContent(gauge: GaugeInstance, themes: ThemesMap): Pick
     return { x: gauge.x, y: gauge.y, width: img.width, height: img.height };
   }
   if (opts.mode === 'text') {
-    const box = measureImportedText({
-      text: opts.textContent,
-      font: opts.textFont,
-      fontSize: opts.textFontSize,
-      bold: opts.textBold,
-      italic: opts.textItalic,
-      color: opts.textColor,
-      align: opts.textAlign,
-    });
+    const text = measureImportedText(importedTextFromOpts(opts));
+    const box = rotatedBounds(text.width, text.height, opts.rotation);
+    // A rotated label keeps its center, since it turns about it.
+    if (box.width !== text.width || box.height !== text.height) {
+      return {
+        x: Math.round(gauge.x + gauge.width / 2 - box.width / 2),
+        y: Math.round(gauge.y + gauge.height / 2 - box.height / 2),
+        width: box.width,
+        height: box.height,
+      };
+    }
     return { x: gauge.x, y: gauge.y, width: box.width, height: box.height };
   }
   const canvas = document.createElement('canvas');

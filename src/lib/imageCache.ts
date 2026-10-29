@@ -4,8 +4,33 @@
 // decodes each data URL once and caches the result so repeated renders
 // (zoom, gauge drags, pattern tweaks, ...) don't redecode every frame, and
 // exposes a synchronous lookup so the pure renderBackground() stays sync.
+//
+// Decoded pixels are kept under CACHE_BUDGET_BYTES, least recently used
+// evicted first (a Map iterates in insertion order, and a hit re-inserts),
+// so swapping images over a long session doesn't grow memory forever. An
+// evicted image is just decoded again on its next preload.
+const CACHE_BUDGET_BYTES = 256 * 1024 * 1024;
 const cache = new Map<string, HTMLImageElement>();
 const inFlight = new Map<string, Promise<HTMLImageElement>>();
+let cachedBytes = 0;
+
+function decodedBytes(img: HTMLImageElement): number {
+  return img.width * img.height * 4;
+}
+
+function cacheImage(src: string, img: HTMLImageElement) {
+  const old = cache.get(src);
+  if (old) cachedBytes -= decodedBytes(old);
+  cache.delete(src);
+  cache.set(src, img);
+  cachedBytes += decodedBytes(img);
+  // The entry just inserted is the newest, so it is never the one evicted.
+  for (const [key, entry] of cache) {
+    if (cachedBytes <= CACHE_BUDGET_BYTES || cache.size <= 1) break;
+    cache.delete(key);
+    cachedBytes -= decodedBytes(entry);
+  }
+}
 
 // Project files / autosaves should only carry inlined images. A remote URL
 // in `background.image` would fetch on load (privacy) and could be huge.
@@ -19,7 +44,12 @@ export function sanitizeImageSrc(src: string | null | undefined): string | null 
 }
 
 export function getCachedImage(src: string): HTMLImageElement | undefined {
-  return cache.get(src);
+  const img = cache.get(src);
+  if (img) {
+    cache.delete(src);
+    cache.set(src, img);
+  }
+  return img;
 }
 
 export async function preloadImages(srcs: string[]): Promise<void> {
@@ -37,7 +67,7 @@ export function loadImage(src: string): Promise<HTMLImageElement> {
   const promise = new Promise<HTMLImageElement>((resolve, reject) => {
     const img = new Image();
     img.onload = () => {
-      cache.set(src, img);
+      cacheImage(src, img);
       inFlight.delete(src);
       resolve(img);
     };

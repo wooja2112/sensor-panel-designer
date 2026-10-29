@@ -5,8 +5,9 @@ import {
   MIN_DIAMETER, MAX_DIAMETER, SIDE_OPTIONS,
   MIN_BORDER, MAX_BORDER, MIN_GRADIENT_ANGLE, MAX_GRADIENT_ANGLE,
   MIN_TITLE_BAR_HEIGHT, MAX_TITLE_BAR_HEIGHT, MIN_CORNER_RADIUS, MAX_CORNER_RADIUS,
-  MIN_DENSITY, MAX_DENSITY, MIN_LINE_WIDTH, MAX_LINE_WIDTH,
+  MIN_DENSITY, MAX_DENSITY, MIN_LINE_WIDTH, MAX_LINE_WIDTH, MIN_IMAGE_BRIGHTNESS, MAX_IMAGE_BRIGHTNESS,
 } from '../lib/backgroundRender';
+import { MAX_CANVAS_SIZE, clampCanvasSize } from '../types';
 import type { BackgroundOptions, PatternKey, BackgroundShape, BackgroundImageFit } from '../lib/backgroundRender';
 import { readBackgroundImageFile } from '../lib/imageCache';
 import { parseIntegerInput } from '../lib/number';
@@ -77,13 +78,13 @@ export function BackgroundPanel({
     <div className="flex flex-col gap-3.5">
       <CtrlRow label="Panel size (px)">
         <div className="flex items-center gap-2">
-          <input type="number" value={width} min={1} step={1}
-            onChange={e => onSizeChange({ width: Math.max(1, parseIntegerInput(e.target.value, 1)) })}
+          <input type="number" value={width} min={1} max={MAX_CANVAS_SIZE} step={1}
+            onChange={e => onSizeChange({ width: clampCanvasSize(parseIntegerInput(e.target.value, 1)) })}
             className={numberInputClass}
           />
           <span className="text-xs text-muted-foreground">×</span>
-          <input type="number" value={height} min={1} step={1}
-            onChange={e => onSizeChange({ height: Math.max(1, parseIntegerInput(e.target.value, 1)) })}
+          <input type="number" value={height} min={1} max={MAX_CANVAS_SIZE} step={1}
+            onChange={e => onSizeChange({ height: clampCanvasSize(parseIntegerInput(e.target.value, 1)) })}
             className={numberInputClass}
           />
         </div>
@@ -115,6 +116,21 @@ export function BackgroundPanel({
           )}
         </div>
       </CtrlRow>
+
+      {background.image && (
+        <>
+          <CtrlRow label="Image grayscale">
+            <div className="flex gap-1.5">
+              <Pill active={background.imageGrayscale} onClick={() => onChange({ imageGrayscale: true })}>On</Pill>
+              <Pill active={!background.imageGrayscale} onClick={() => onChange({ imageGrayscale: false })}>Off</Pill>
+            </div>
+          </CtrlRow>
+          <CtrlRow label={`Image brightness — ${background.imageBrightness}%`}>
+            <SliderRow value={background.imageBrightness} min={MIN_IMAGE_BRIGHTNESS} max={MAX_IMAGE_BRIGHTNESS}
+              onChange={v => onChange({ imageBrightness: v })} />
+          </CtrlRow>
+        </>
+      )}
 
       <div className="border-t border-border/50" />
 

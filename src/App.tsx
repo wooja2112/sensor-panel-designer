@@ -7,6 +7,7 @@ import { DEFAULT_THEMES } from './lib/gaugeRender';
 import {
   centerSelection as centerSelectionLayout,
   makeSameSize as sameSizeLayout,
+  restack,
   spaceEvenly as spaceEvenlyLayout,
 } from './lib/layout';
 import { clearAutosave, downloadPanelFile, loadAutosave, saveAutosave } from './lib/file';
@@ -20,6 +21,7 @@ import { CanvasWorkspace } from './components/CanvasWorkspace';
 import { LayersPanel } from './components/LayersPanel';
 import { ExportBar } from './components/ExportBar';
 import { ThemeDesigner } from './components/ThemeDesigner';
+import { ContextMenu, type ContextAction, type OpenMenu } from './components/ContextMenu';
 import { useDesignHistory } from './hooks/useDesignHistory';
 import type { DesignSnapshot } from './lib/designHistory';
 import { isEditableKeyboardTarget } from './lib/keyboard';
@@ -41,6 +43,8 @@ export default function App() {
   const [showDesigner, setShowDesigner] = useState(false);
   const [restoredBannerDismissed, setRestoredBannerDismissed] = useState(false);
   const [autosaveFailed, setAutosaveFailed] = useState(false);
+  const [menu, setMenu] = useState<OpenMenu | null>(null);
+  const closeMenu = useCallback(() => setMenu(null), []);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const selectedId = selectedIds[0] ?? null;
@@ -205,12 +209,16 @@ export default function App() {
     setPanel(p => ({ ...p, ...patch }));
   }, []);
 
-  const addGauge = useCallback((mode: GaugeMode) => {
+  const addGaugeAt = useCallback((mode: GaugeMode, x: number, y: number) => {
     const themeKey = Object.keys(themes)[0] ?? 'classic';
-    const gauge = createGaugeInstance(mode, themeKey, panel.width / 2, panel.height / 2);
+    const gauge = createGaugeInstance(mode, themeKey, x, y);
     setGauges(gs => [...gs, gauge]);
     setSelectedIds([gauge.id]);
-  }, [panel.width, panel.height, themes]);
+  }, [themes]);
+
+  const addGauge = useCallback((mode: GaugeMode) => {
+    addGaugeAt(mode, panel.width / 2, panel.height / 2);
+  }, [addGaugeAt, panel.width, panel.height]);
 
   const updateGaugeOpts = useCallback((id: string, patch: Partial<DrawOptions>) => {
     setGauges(gs => gs.map(g => g.id === id ? { ...g, opts: { ...g.opts, ...patch } } : g));
@@ -254,6 +262,20 @@ export default function App() {
     setGauges(gs => gs.filter(g => g.id !== id));
     setSelectedIds(sel => sel.filter(x => x !== id));
   }, []);
+
+  // Right-click menu entries act on the current selection, which the
+  // right-click itself has already set.
+  const contextAction = useCallback((action: ContextAction) => {
+    switch (action.kind) {
+      case 'duplicate': duplicateSelected(); break;
+      case 'delete': deleteSelected(); break;
+      case 'fitToContent': fitAllSelectedToContent(); break;
+      case 'center': centerSelection(action.axis); break;
+      case 'restack': setGauges(gs => restack(gs, selectedIds, action.stack)); break;
+      case 'add': addGaugeAt(action.mode, action.x, action.y); break;
+      case 'selectAll': setSelectedIds(gauges.map(g => g.id)); break;
+    }
+  }, [duplicateSelected, deleteSelected, fitAllSelectedToContent, centerSelection, selectedIds, addGaugeAt, gauges]);
 
   const reorderGauge = useCallback((id: string, dir: -1 | 1) => {
     setGauges(gs => {
@@ -327,6 +349,7 @@ export default function App() {
               onSelect={selectGauge}
               onMoveGauges={moveGauges}
               onResizeGauge={resizeGauge}
+              onOpenMenu={setMenu}
             />
           </div>
           <LayersPanel
@@ -336,6 +359,7 @@ export default function App() {
             onAdd={addGauge}
             onDelete={deleteGauge}
             onReorder={reorderGauge}
+            onOpenMenu={setMenu}
           />
         </div>
 
@@ -380,6 +404,8 @@ export default function App() {
         themes={themes}
         selectedGauge={selectedGauge}
       />
+
+      {menu && <ContextMenu menu={menu} onAction={contextAction} onClose={closeMenu} />}
 
       {showDesigner && (
         <ThemeDesigner

@@ -84,3 +84,28 @@ export function centerSelection(
   const dy = Math.round((panelHeight - (minY + maxY)) / 2);
   return gauges.map(g => selectedIds.includes(g.id) ? { ...g, y: g.y + dy } : g);
 }
+
+export type Stack = 'forward' | 'backward' | 'toFront' | 'toBack';
+
+// Moves the selection through the draw order (later in the list is drawn on
+// top). A selected gauge only swaps past unselected ones, so a selected run
+// moves together and keeps its own order.
+export function restack(gauges: GaugeInstance[], selectedIds: string[], stack: Stack): GaugeInstance[] {
+  const sel = (g: GaugeInstance) => selectedIds.includes(g.id);
+  const next = [...gauges];
+  if (stack === 'forward') {
+    for (let i = next.length - 2; i >= 0; i--) {
+      if (sel(next[i]) && !sel(next[i + 1])) [next[i], next[i + 1]] = [next[i + 1], next[i]];
+    }
+    return next;
+  }
+  if (stack === 'backward') {
+    for (let i = 1; i < next.length; i++) {
+      if (sel(next[i]) && !sel(next[i - 1])) [next[i], next[i - 1]] = [next[i - 1], next[i]];
+    }
+    return next;
+  }
+  const picked = gauges.filter(sel);
+  const rest = gauges.filter(g => !sel(g));
+  return stack === 'toFront' ? [...rest, ...picked] : [...picked, ...rest];
+}

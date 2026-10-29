@@ -41,6 +41,9 @@ export interface BackgroundOptions {
   backgroundGradientAngle: number;
   image: string | null;
   imageFit: BackgroundImageFit;
+  // Brightness is a percentage (100 = unchanged), like CSS's brightness().
+  imageGrayscale: boolean;
+  imageBrightness: number;
   pattern: PatternKey;
   patternColor: string;
   density: number;
@@ -76,6 +79,9 @@ export const MAX_BORDER = 100;
 export const MIN_GRADIENT_ANGLE = 0;
 export const MAX_GRADIENT_ANGLE = 359;
 
+export const MIN_IMAGE_BRIGHTNESS = 0;
+export const MAX_IMAGE_BRIGHTNESS = 200;
+
 export const MIN_TITLE_BAR_HEIGHT = 10;
 export const MAX_TITLE_BAR_HEIGHT = 150;
 
@@ -91,6 +97,8 @@ export function defaultBackgroundOptions(): BackgroundOptions {
     backgroundGradientAngle: 0,
     image: null,
     imageFit: 'cover',
+    imageGrayscale: false,
+    imageBrightness: 100,
     pattern: 'none',
     patternColor: '#ffffff',
     density: 5,
@@ -655,17 +663,56 @@ function drawBorder(
   ctx.restore();
 }
 
-function drawBackgroundImage(ctx: CanvasRenderingContext2D, canvasWidth: number, canvasHeight: number, image: string, fit: BackgroundImageFit) {
-  const img = getCachedImage(image);
-  if (!img || img.width === 0 || img.height === 0) return; // not decoded yet — caller re-renders once it is
+// Grayscale (Rec. 709 luma, as CSS grayscale()) and brightness applied to
+// RGBA pixels in place. Both are linear in the channels; brightness clamps at
+// full intensity.
+export function adjustImagePixels(data: Uint8ClampedArray, grayscale: boolean, brightness: number) {
+  const k = Math.min(MAX_IMAGE_BRIGHTNESS, Math.max(MIN_IMAGE_BRIGHTNESS, brightness)) / 100;
+  for (let i = 0; i < data.length; i += 4) {
+    let r = data[i], g = data[i + 1], b = data[i + 2];
+    if (grayscale) {
+      const y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+      r = y; g = y; b = y;
+    }
+    data[i] = Math.round(r * k);
+    data[i + 1] = Math.round(g * k);
+    data[i + 2] = Math.round(b * k);
+  }
+}
+
+// The adjusted copy of the most recent background image, so redraws while
+// dragging gauges don't redo the per-pixel pass.
+let adjustedCache: { img: HTMLImageElement; grayscale: boolean; brightness: number; canvas: HTMLCanvasElement } | null = null;
+
+function adjustedImage(img: HTMLImageElement, grayscale: boolean, brightness: number): CanvasImageSource {
+  if (!grayscale && brightness === 100) return img;
+  const hit = adjustedCache;
+  if (hit && hit.img === img && hit.grayscale === grayscale && hit.brightness === brightness) return hit.canvas;
+  const canvas = document.createElement('canvas');
+  canvas.width = img.width;
+  canvas.height = img.height;
+  const ctx = canvas.getContext('2d')!;
+  ctx.drawImage(img, 0, 0);
+  const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  adjustImagePixels(pixels.data, grayscale, brightness);
+  ctx.putImageData(pixels, 0, 0);
+  adjustedCache = { img, grayscale, brightness, canvas };
+  return canvas;
+}
+
+function drawBackgroundImage(ctx: CanvasRenderingContext2D, canvasWidth: number, canvasHeight: number, image: string, options: BackgroundOptions) {
+  const decoded = getCachedImage(image);
+  if (!decoded || decoded.width === 0 || decoded.height === 0) return; // not decoded yet — caller re-renders once it is
+  const img = adjustedImage(decoded, options.imageGrayscale, options.imageBrightness);
+  const fit = options.imageFit;
 
   // Anchored at the top-left corner (0,0) rather than centered — an
   // oversized image (in 'actual' fit, or a 'cover' fit whose aspect ratio
   // doesn't match the panel) is cropped off its right/bottom edges instead
   // of symmetrically off all sides.
   if (fit === 'cover') {
-    const scale = Math.max(canvasWidth / img.width, canvasHeight / img.height);
-    ctx.drawImage(img, 0, 0, img.width * scale, img.height * scale);
+    const scale = Math.max(canvasWidth / decoded.width, canvasHeight / decoded.height);
+    ctx.drawImage(img, 0, 0, decoded.width * scale, decoded.height * scale);
   } else {
     ctx.drawImage(img, 0, 0);
   }
@@ -684,7 +731,6 @@ export function renderBackground(ctx: CanvasRenderingContext2D, canvasWidth: num
     colorEnd,
     backgroundGradientAngle,
     image,
-    imageFit,
     pattern,
     patternColor,
     density,
@@ -728,7 +774,7 @@ export function renderBackground(ctx: CanvasRenderingContext2D, canvasWidth: num
   }
 
   if (image) {
-    drawBackgroundImage(ctx, canvasWidth, canvasHeight, image, imageFit);
+    drawBackgroundImage(ctx, canvasWidth, canvasHeight, image, options);
   }
 
   const drawPattern = pattern !== 'none' ? PATTERN_DRAW_FUNCTIONS[pattern] : undefined;

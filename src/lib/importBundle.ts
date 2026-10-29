@@ -6,11 +6,11 @@
 // plus layout/sensor tags — those reconstruct as positioned bitmaps
 // (`importedImage`) rather than live DrawOptions.
 import type JSZip from 'jszip';
-import { JSZip as Zip } from './zip';
+import { JSZip as Zip, readZipEntry, readZipText, unzipBudget, type UnzipBudget } from './zip';
 import { DESIGN_SIDECAR_NAME, SENSOR_PANEL_FILE_VERSION, parsePanelFile, type SensorPanelFile } from './file';
 import { defaultBackgroundOptions } from './backgroundRender';
 import { DEFAULT_THEMES } from './gaugeRender';
-import { defaultPanelConfig, normalizeGauge, type GaugeInstance, type ImportedText } from '../types';
+import { clampCanvasSize, defaultPanelConfig, normalizeGauge, type GaugeInstance, type ImportedText } from '../types';
 import { measureImportedText } from './importedText';
 
 export interface AidaParsedItem {
@@ -355,12 +355,12 @@ function imageMime(bytes: Uint8Array): string {
   return 'image/png';
 }
 
-async function zipPngDataUrl(zip: JSZip, path: string): Promise<string | null> {
-  const img = await zipImage(zip, path);
+async function zipPngDataUrl(zip: JSZip, path: string, budget: UnzipBudget): Promise<string | null> {
+  const img = await zipImage(zip, path, budget);
   return img?.dataUrl ?? null;
 }
 
-async function zipImage(zip: JSZip, path: string): Promise<{ dataUrl: string; width: number; height: number } | null> {
+async function zipImage(zip: JSZip, path: string, budget: UnzipBudget): Promise<{ dataUrl: string; width: number; height: number } | null> {
   const base = path.replace(/\\/g, '/').split('/').pop() ?? path;
   let entry = findZipFile(zip, path, base, `assets/${base}`, `assets\\${base}`);
   if (!entry) {
@@ -369,7 +369,7 @@ async function zipImage(zip: JSZip, path: string): Promise<{ dataUrl: string; wi
     if (matches.length > 0) entry = zip.files[matches[0]];
   }
   if (!entry) return null;
-  const bytes = await entry.async('uint8array');
+  const bytes = await readZipEntry(entry, budget);
   const size = pngSize(bytes) ?? await rasterSize(bytes);
   return {
     dataUrl: uint8ToDataUrl(bytes, imageMime(bytes)),
@@ -440,10 +440,10 @@ function aidaSensorIdFromItemId(id: string): string {
   return id.replace(/^-/, '').replace(/^\[GAUGE\]/i, '').replace(/[^A-Z0-9_]/gi, '').toUpperCase();
 }
 
-async function importAidaZip(zip: JSZip): Promise<SensorPanelFile> {
+async function importAidaZip(zip: JSZip, budget: UnzipBudget): Promise<SensorPanelFile> {
   const def = findZipFile(zip, 'panel.sp2');
   if (!def) throw new Error('That .spzip is missing panel.sp2.');
-  const parsed = parseAidaPanelText(decodeAidaDefBytes(await def.async('uint8array')));
+  const parsed = parseAidaPanelText(decodeAidaDefBytes(await readZipEntry(def, budget)));
   let backgroundImage: string | null = null;
   const gauges: GaugeInstance[] = [];
 
@@ -453,7 +453,7 @@ async function importAidaZip(zip: JSZip): Promise<SensorPanelFile> {
     const isGauge = /\[GAUGE\]/i.test(id);
     if (isImg && item.tags.BGIMG === '1') {
       const file = item.tags.IMGFIL;
-      if (file) backgroundImage = await zipPngDataUrl(zip, file);
+      if (file) backgroundImage = await zipPngDataUrl(zip, file, budget);
       continue;
     }
     if (isImg) {
@@ -464,7 +464,7 @@ async function importAidaZip(zip: JSZip): Promise<SensorPanelFile> {
         y: parseInt(item.tags.ITMY ?? '0', 10) || 0,
         width: parseInt(item.tags.RESIZW ?? '1', 10) || 1,
         height: parseInt(item.tags.RESIZH ?? '1', 10) || 1,
-        importedImage: file ? await zipPngDataUrl(zip, file) : null,
+        importedImage: file ? await zipPngDataUrl(zip, file, budget) : null,
         mode: 'image',
       }));
       continue;
@@ -478,7 +478,7 @@ async function importAidaZip(zip: JSZip): Promise<SensorPanelFile> {
         y: parseInt(item.tags.ITMY ?? '0', 10) || 0,
         width: parseInt(item.tags.RESIZW ?? '1', 10) || 1,
         height: parseInt(item.tags.RESIZH ?? '1', 10) || 1,
-        importedImage: file ? await zipPngDataUrl(zip, file) : null,
+        importedImage: file ? await zipPngDataUrl(zip, file, budget) : null,
         aidaSensorId: aidaSensorIdFromItemId(id),
         mode: 'bar',
       }));
@@ -486,8 +486,8 @@ async function importAidaZip(zip: JSZip): Promise<SensorPanelFile> {
   }
 
   const panel = {
-    width: parsed.width,
-    height: parsed.height,
+    width: clampCanvasSize(parsed.width),
+    height: clampCanvasSize(parsed.height),
     background: {
       ...defaultBackgroundOptions(),
       color: parsed.bgColor,
@@ -515,13 +515,13 @@ function isFullPanelBackground(
   return covers || named;
 }
 
-async function importInfoPanelZip(zip: JSZip): Promise<SensorPanelFile> {
+async function importInfoPanelZip(zip: JSZip, budget: UnzipBudget): Promise<SensorPanelFile> {
   const profileEntry = findZipFile(zip, 'Profile.xml');
   const itemsEntry = findZipFile(zip, 'DisplayItems.xml');
   if (!profileEntry || !itemsEntry) {
     throw new Error('That .infopanel is missing Profile.xml or DisplayItems.xml.');
   }
-  const parsed = parseInfoPanelXml(await profileEntry.async('string'), await itemsEntry.async('string'));
+  const parsed = parseInfoPanelXml(await readZipText(profileEntry, budget), await readZipText(itemsEntry, budget));
   let backgroundImage: string | null = null;
   const gauges: GaugeInstance[] = [];
 
@@ -543,7 +543,7 @@ async function importInfoPanelZip(zip: JSZip): Promise<SensorPanelFile> {
     }
     const file = pickFrame(item.filePaths, item.type === 'gauge' ? 0.68 : 0);
     if (!file) continue;
-    const image = await zipImage(zip, file);
+    const image = await zipImage(zip, file, budget);
     if (!image) continue;
     const size = visualSize(item, image.width, image.height);
     if (isFullPanelBackground(item, size, parsed.width, parsed.height)) {
@@ -565,8 +565,8 @@ async function importInfoPanelZip(zip: JSZip): Promise<SensorPanelFile> {
   return {
     version: SENSOR_PANEL_FILE_VERSION,
     panel: {
-      width: parsed.width,
-      height: parsed.height,
+      width: clampCanvasSize(parsed.width),
+      height: clampCanvasSize(parsed.height),
       background: {
         ...defaultBackgroundOptions(),
         color: parsed.color,
@@ -583,10 +583,11 @@ async function importInfoPanelZip(zip: JSZip): Promise<SensorPanelFile> {
 
 async function importZipBundle(file: Blob): Promise<SensorPanelFile> {
   const zip = await Zip.loadAsync(await file.arrayBuffer());
+  const budget = unzipBudget();
   const sidecar = findZipFile(zip, DESIGN_SIDECAR_NAME);
-  if (sidecar) return parsePanelFile(await sidecar.async('string'));
-  if (findZipFile(zip, 'panel.sp2')) return importAidaZip(zip);
-  if (findZipFile(zip, 'Profile.xml') || findZipFile(zip, 'DisplayItems.xml')) return importInfoPanelZip(zip);
+  if (sidecar) return parsePanelFile(await readZipText(sidecar, budget));
+  if (findZipFile(zip, 'panel.sp2')) return importAidaZip(zip, budget);
+  if (findZipFile(zip, 'Profile.xml') || findZipFile(zip, 'DisplayItems.xml')) return importInfoPanelZip(zip, budget);
   throw new Error('That zip is not a recognized sensor panel bundle.');
 }
 

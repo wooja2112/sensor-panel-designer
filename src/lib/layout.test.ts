@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { centerSelection, makeSameSize, spaceEvenly } from './layout';
+import { centerSelection, makeSameSize, restack, spaceEvenly, type Stack } from './layout';
 import { computeGaugeOuterRadius, type GaugeMode } from './gaugeRender';
 import { normalizeGauge, type GaugeInstance } from '../types';
 
@@ -97,5 +97,18 @@ describe('makeSameSize', () => {
       const next = makeSameSize([anchor, bar], ['anchor', 'bar']);
       expect([byId(next, 'bar').width, byId(next, 'bar').height]).toEqual([200, 200]);
     });
+  });
+});
+
+describe('restack', () => {
+  it('moves the selection one step or to either end, keeping its own order', () => {
+    const base = ['a', 'b', 'c', 'd'].map(id => gauge(id, 0, 0, 20, 20));
+    const run = (sel: string[], stack: Stack) => restack(base, sel, stack).map(g => g.id).join('');
+    expect(run(['a', 'b'], 'forward')).toBe('cabd');
+    expect(run(['d'], 'forward')).toBe('abcd');
+    expect(run(['b', 'd'], 'backward')).toBe('badc');
+    expect(run(['a'], 'backward')).toBe('abcd');
+    expect(run(['a', 'c'], 'toFront')).toBe('bdac');
+    expect(run(['b', 'd'], 'toBack')).toBe('bdac');
   });
 });

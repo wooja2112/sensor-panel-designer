@@ -3,7 +3,7 @@ import { DEFAULT_THEMES, barCanvasIsSwapped, defaultDrawOptions, gaugeSensorRang
 import { isAllowedImageSrc, sanitizeImageSrc } from './imageCache';
 import { parseIntegerInput, parseNumberInput } from './number';
 import { parsePanelFile } from './file';
-import { cloneGaugeInstance, normalizeGauge, normalizeThemes, remapThemeKeys } from '../types';
+import { MAX_CANVAS_SIZE, MAX_SEGMENTS, cloneGaugeInstance, normalizeGauge, normalizePanel, normalizeThemes, remapThemeKeys } from '../types';
 
 describe('parseNumberInput', () => {
   it('keeps negatives instead of coercing them to the fallback', () => {
@@ -51,6 +51,27 @@ describe('normalizeGauge', () => {
     expect(g.opts.textContent).toBe('68%');
     expect(g.opts.textBold).toBe(true);
     expect(g.opts.textAlign).toBe('center');
+  });
+
+  it('caps sizes and segment counts that a corrupt file could make unrenderable', () => {
+    const g = normalizeGauge({ width: 1e12, height: -5, opts: { mode: 'bar' } });
+    expect([g.width, g.height]).toEqual([MAX_CANVAS_SIZE, 1]);
+    const segs = (n: number) => normalizeGauge({ opts: { mode: 'bar', nSegs: n } }).opts.nSegs;
+    expect(segs(1e9)).toBe(MAX_SEGMENTS);
+    expect(segs(-3)).toBe(0);
+    expect(segs(7.6)).toBe(8);
+    expect(segs(12)).toBe(12);
+    const p = normalizePanel({ width: 200000, height: 0 });
+    expect([p.width, p.height]).toEqual([MAX_CANVAS_SIZE, 1]);
+  });
+
+  it('turns a hidden percent sign from older files into no unit', () => {
+    expect(normalizeGauge({ opts: { mode: 'circ', labelShowPercent: false } }).opts.labelUnit).toBe('none');
+    expect(normalizeGauge({ opts: { mode: 'circ', labelShowPercent: false, labelUnit: 'celsius' } }).opts.labelUnit).toBe('celsius');
+    const g = normalizeGauge({ opts: { mode: 'circ' } });
+    expect(g.opts.labelUnit).toBe('percent');
+    expect([g.opts.ringStyle, g.opts.barGlow, g.opts.thermoScales]).toEqual(['arc', false, 'both']);
+    expect('labelShowPercent' in g.opts).toBe(false);
   });
 });
 
@@ -106,7 +127,12 @@ describe('gaugeSensorRange', () => {
     expect(gaugeSensorRange(opts)).toEqual({ min: 20, max: 90 });
   });
 
-  it('exports classic dial min/max and leaves other gauges at 0–100', () => {
+  it('exports the value range of non-thermometer gauges', () => {
+    expect(gaugeSensorRange({ ...defaultDrawOptions('bar'), dialMin: 0, dialMax: 150 })).toEqual({ min: 0, max: 150 });
+    expect(gaugeSensorRange({ ...defaultDrawOptions('circ'), dialMin: 40, dialMax: 40 })).toEqual({ min: 40, max: 41 });
+  });
+
+  it('exports classic dial min/max and defaults other gauges to 0–100', () => {
     const classic = {
       ...defaultDrawOptions('needle'),
       needleStyle: 'classic' as const,

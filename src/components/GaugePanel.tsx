@@ -3,8 +3,10 @@
 // useState block) — reshaped to operate on a single GaugeInstance via props.
 import { useRef, useState } from 'react';
 import type { GaugeInstance, PanelConfig } from '../types';
-import type { DrawOptions, GaugeMode, ColorMode, LabelPos, ContainerShape, ContainerCorner, ThemesMap } from '../lib/gaugeRender';
+import { MAX_CANVAS_SIZE, clampCanvasSize } from '../types';
+import type { BarStyle, DrawOptions, GaugeMode, ColorMode, LabelPos, LabelUnit, ContainerShape, ContainerCorner, RingStyle, ThermoScales, ThemesMap } from '../lib/gaugeRender';
 import { defaultSizeForMode, GAUGE_MODE_LABELS, isSensorGaugeMode } from '../lib/gaugeRender';
+import { importedTextFromOpts, normalizeRotation, rotatedBounds, textFrameSize } from '../lib/importedText';
 import { parseIntegerInput, parseNumberInput } from '../lib/number';
 import { readBackgroundImageFile } from '../lib/imageCache';
 import { CtrlRow, Pill, ColorField, SliderRow } from './ui-primitives';
@@ -22,6 +24,50 @@ const CONTAINER_PRESETS: { name: string; c1: string; c2: string }[] = [
 const selectClass = 'flex-1 bg-background border border-border rounded px-2 py-1 text-[11px] text-foreground focus:outline-none cursor-pointer';
 const numberInputClass = 'bg-background border border-border rounded px-2 py-1 text-[11px] w-full text-center text-foreground focus:outline-none focus:border-primary/60';
 const textInputClass = 'flex-1 bg-background border border-border rounded px-2 py-1 text-[11px] text-foreground w-full focus:outline-none focus:border-primary/60';
+const hintClass = 'text-[9px] text-muted-foreground leading-relaxed';
+
+const BAR_STYLES: [BarStyle, string][] = [
+  ['flat', 'Flat'], ['ascending', 'Ascending'], ['slanted', 'Slanted'], ['chevron', 'Chevron'], ['hex', 'Hex'], ['thermometer', 'Thermometer'],
+];
+const RING_STYLES: [RingStyle, string][] = [['arc', 'Arc'], ['dots', 'Dots'], ['sunburst', 'Sunburst']];
+const THERMO_SCALES: [ThermoScales, string][] = [['both', '°F + °C'], ['f', '°F only'], ['c', '°C only']];
+const LABEL_UNITS: [LabelUnit, string][] = [['none', 'None'], ['percent', '%'], ['celsius', '°C'], ['fahrenheit', '°F'], ['custom', 'Custom']];
+
+// Font, size and color rows for a piece of gauge text. An empty font or
+// color and a zero size mean "automatic"; `autoColor` names that choice.
+function TextStyleRows({ what, font, size, color, autoColor, onChange }: {
+  what: string;
+  font: string;
+  size: number;
+  color: string;
+  autoColor: string;
+  onChange: (patch: { font?: string; size?: number; color?: string }) => void;
+}) {
+  const auto = size <= 0;
+  return (
+    <>
+      <CtrlRow label={`${what} font`}>
+        <div className="flex items-center gap-1.5">
+          <Pill active={font === ''} onClick={() => onChange({ font: '' })}>Default</Pill>
+          <input value={font} onChange={e => onChange({ font: e.target.value })} placeholder="Font family" className={textInputClass} />
+        </div>
+      </CtrlRow>
+      <CtrlRow label={auto ? `${what} size — auto` : `${what} size — ${size}px`}>
+        <div className="flex gap-1.5">
+          <Pill active={auto} onClick={() => onChange({ size: 0 })}>Auto</Pill>
+          <Pill active={!auto} onClick={() => { if (auto) onChange({ size: 24 }); }}>Custom</Pill>
+        </div>
+        {!auto && <SliderRow value={size} min={6} max={200} onChange={v => onChange({ size: v })} />}
+      </CtrlRow>
+      <CtrlRow label={`${what} color`}>
+        <div className="flex items-center gap-1.5">
+          <Pill active={color === ''} onClick={() => onChange({ color: '' })}>{autoColor}</Pill>
+          <ColorField value={color || '#ffffff'} onChange={v => onChange({ color: v })} />
+        </div>
+      </CtrlRow>
+    </>
+  );
+}
 
 export function GaugePanel({
   gauge, panel, themes, onChange, onMeta, onOpenThemeDesigner, onDelete, onDuplicate, onFitToContent,
@@ -55,8 +101,31 @@ export function GaugePanel({
       mode: m,
       nSegs: m === 'needle' ? 0 : opts.nSegs,
       labelPos: m !== 'circ' && opts.labelPos === 'middle' ? 'top' : opts.labelPos,
+      // A label's box is sized for unrotated text, and a bar's leftover
+      // rotation would otherwise carry over onto it.
+      ...(m === 'text' ? { rotation: 0 } : {}),
     });
     onMeta({ width: size.width, height: size.height });
+  };
+
+  // Resizes a label's box to hold its text at the new angle, keeping the
+  // center it rotates about.
+  const rotateLabel = (rotation: number) => {
+    const oldRotation = normalizeRotation(opts.rotation);
+    if (rotation === oldRotation) return;
+    const frame = textFrameSize(importedTextFromOpts(opts), oldRotation, gauge.width, gauge.height);
+    const box = rotatedBounds(frame.width, frame.height, rotation);
+    const cx = gauge.x + gauge.width / 2;
+    const cy = gauge.y + gauge.height / 2;
+    onChange({ rotation });
+    onMeta({ width: box.width, height: box.height, x: Math.round(cx - box.width / 2), y: Math.round(cy - box.height / 2) });
+  };
+
+  // Dots and sunburst rings are made of individual marks, so they have no
+  // solid mode and suit higher counts.
+  const marksRing = mode === 'circ' && opts.ringStyle !== 'arc';
+  const selectRingStyle = (style: RingStyle) => {
+    onChange(style !== 'arc' && opts.nSegs === 0 ? { ringStyle: style, nSegs: 24 } : { ringStyle: style });
   };
 
   const selectBarStyle = (style: DrawOptions['barStyle']) => {
@@ -123,8 +192,8 @@ export function GaugePanel({
 
       <CtrlRow label="Size (px)">
         <div className="grid grid-cols-2 gap-2">
-          <input type="number" min={1} value={gauge.width} onChange={e => onMeta({ width: Math.max(1, parseIntegerInput(e.target.value, 1)) })} className={numberInputClass} />
-          <input type="number" min={1} value={gauge.height} onChange={e => onMeta({ height: Math.max(1, parseIntegerInput(e.target.value, 1)) })} className={numberInputClass} />
+          <input type="number" min={1} max={MAX_CANVAS_SIZE} value={gauge.width} onChange={e => onMeta({ width: clampCanvasSize(parseIntegerInput(e.target.value, 1)) })} className={numberInputClass} />
+          <input type="number" min={1} max={MAX_CANVAS_SIZE} value={gauge.height} onChange={e => onMeta({ height: clampCanvasSize(parseIntegerInput(e.target.value, 1)) })} className={numberInputClass} />
         </div>
         <button type="button" onClick={onFitToContent}
           className="w-full px-2 py-1.5 text-[10px] border border-border rounded hover:bg-secondary transition-colors cursor-pointer text-foreground"
@@ -312,7 +381,7 @@ export function GaugePanel({
             <input value={opts.textFont} onChange={e => onChange({ textFont: e.target.value })} className={textInputClass} />
           </CtrlRow>
           <CtrlRow label={`Size — ${opts.textFontSize}px`}>
-            <SliderRow value={opts.textFontSize} min={8} max={128} onChange={v => onChange({ textFontSize: v })} />
+            <SliderRow value={opts.textFontSize} min={8} max={200} onChange={v => onChange({ textFontSize: v })} />
           </CtrlRow>
           <CtrlRow label="Style">
             <div className="flex gap-1.5">
@@ -331,6 +400,14 @@ export function GaugePanel({
           </CtrlRow>
           <CtrlRow label="Color">
             <ColorField value={opts.textColor} onChange={v => onChange({ textColor: v })} />
+          </CtrlRow>
+          <CtrlRow label={`Rotation — ${normalizeRotation(opts.rotation)}°`}>
+            <div className="flex gap-1.5">
+              {[0, 90, 180, 270].map(deg => (
+                <Pill key={deg} active={normalizeRotation(opts.rotation) === deg} onClick={() => rotateLabel(deg)}>{deg}°</Pill>
+              ))}
+            </div>
+            <SliderRow value={normalizeRotation(opts.rotation)} min={0} max={359} onChange={rotateLabel} />
           </CtrlRow>
         </>
       )}
@@ -368,12 +445,22 @@ export function GaugePanel({
         </CtrlRow>
       )}
 
+      {mode === 'circ' && (
+        <CtrlRow label="Ring style">
+          <div className="flex gap-1.5">
+            {RING_STYLES.map(([s, l]) => (
+              <Pill key={s} active={opts.ringStyle === s} onClick={() => selectRingStyle(s)}>{l}</Pill>
+            ))}
+          </div>
+        </CtrlRow>
+      )}
+
       {/* Segments */}
       {isSensorGaugeMode(mode) && mode !== 'needle' && !isThermo && (
         <CtrlRow label="Segments">
           <div className="flex gap-1.5 flex-wrap">
-            <Pill active={opts.nSegs === 0} onClick={() => onChange({ nSegs: 0 })}>Solid</Pill>
-            {[5, 8, 10, 12, 20, 50].map(n => (
+            {!marksRing && <Pill active={opts.nSegs === 0} onClick={() => onChange({ nSegs: 0 })}>Solid</Pill>}
+            {(marksRing ? [12, 20, 24, 36, 50] : [5, 8, 10, 12, 20, 50]).map(n => (
               <Pill key={n} active={opts.nSegs === n} onClick={() => onChange({ nSegs: n })}>{n}</Pill>
             ))}
           </div>
@@ -423,10 +510,9 @@ export function GaugePanel({
       {mode === 'bar' && (
         <CtrlRow label="Bar style">
           <div className="flex gap-1.5 flex-wrap">
-            <Pill active={opts.barStyle === 'flat'} onClick={() => selectBarStyle('flat')}>Flat</Pill>
-            <Pill active={opts.barStyle === 'ascending'} onClick={() => selectBarStyle('ascending')}>Ascending</Pill>
-            <Pill active={opts.barStyle === 'slanted'} onClick={() => selectBarStyle('slanted')}>Slanted</Pill>
-            <Pill active={opts.barStyle === 'thermometer'} onClick={() => selectBarStyle('thermometer')}>Thermometer</Pill>
+            {BAR_STYLES.map(([s, l]) => (
+              <Pill key={s} active={opts.barStyle === s} onClick={() => selectBarStyle(s)}>{l}</Pill>
+            ))}
           </div>
         </CtrlRow>
       )}
@@ -434,7 +520,22 @@ export function GaugePanel({
       {isThermo && (
         <>
           <CtrlRow label="Mercury color">
-            <ColorField value={opts.mercuryColor} onChange={v => onChange({ mercuryColor: v })} />
+            <div className="flex gap-1.5">
+              <Pill active={opts.mercuryTheme} onClick={() => onChange({ mercuryTheme: true })}>Theme</Pill>
+              <Pill active={!opts.mercuryTheme} onClick={() => onChange({ mercuryTheme: false })}>Custom</Pill>
+            </div>
+            {opts.mercuryTheme ? (
+              <span className={hintClass}>Follows the gauge theme's zone colors, shifting from low to high as the temperature rises.</span>
+            ) : (
+              <ColorField value={opts.mercuryColor} onChange={v => onChange({ mercuryColor: v })} />
+            )}
+          </CtrlRow>
+          <CtrlRow label="Scales">
+            <div className="flex gap-1.5">
+              {THERMO_SCALES.map(([s, l]) => (
+                <Pill key={s} active={opts.thermoScales === s} onClick={() => onChange({ thermoScales: s })}>{l}</Pill>
+              ))}
+            </div>
           </CtrlRow>
           <CtrlRow label="Temperature entry unit">
             <div className="flex gap-1.5">
@@ -462,22 +563,44 @@ export function GaugePanel({
               />
             </div>
             <span className="text-[9px] text-muted-foreground leading-relaxed">
-              Both °F and °C scales always show — this just picks which unit you're typing in.
+              This just picks which unit you're typing in; Scales above picks which ones are drawn.
               AIDA64/InfoPanel exports use this range in °C (typical for temp sensors). Preview is 0–100% of the range.
             </span>
           </CtrlRow>
           <CtrlRow label={`Tick marks — ${opts.thermoTickCount}`}>
             <SliderRow value={opts.thermoTickCount} min={2} max={11} onChange={v => onChange({ thermoTickCount: v })} />
           </CtrlRow>
+          <TextStyleRows what="Scale text" font={opts.thermoScaleFont} size={opts.thermoScaleFontSize} color={opts.thermoScaleColor} autoColor="Default"
+            onChange={p => onChange({
+              ...(p.font !== undefined ? { thermoScaleFont: p.font } : {}),
+              ...(p.size !== undefined ? { thermoScaleFontSize: p.size } : {}),
+              ...(p.color !== undefined ? { thermoScaleColor: p.color } : {}),
+            })}
+          />
         </>
       )}
 
-      {isSensorGaugeMode(mode) && mode !== 'needle' && !isThermo && (
+      {isSensorGaugeMode(mode) && mode !== 'needle' && !isThermo && !(marksRing && opts.nSegs > 0) && (
         <CtrlRow label={mode === 'circ' ? 'Inner ring 3D effect' : '3D effect'}>
           <div className="flex gap-1.5">
             <Pill active={opts.gauge3D} onClick={() => onChange({ gauge3D: true })}>On</Pill>
             <Pill active={!opts.gauge3D} onClick={() => onChange({ gauge3D: false })}>Off</Pill>
           </div>
+        </CtrlRow>
+      )}
+
+      {mode === 'bar' && !isThermo && (
+        <CtrlRow label="Neon glow">
+          <div className="flex gap-1.5">
+            <Pill active={opts.barGlow} onClick={() => onChange({ barGlow: true })}>On</Pill>
+            <Pill active={!opts.barGlow} onClick={() => onChange({ barGlow: false })}>Off</Pill>
+          </div>
+        </CtrlRow>
+      )}
+
+      {mode === 'bar' && !isThermo && opts.barGlow && (
+        <CtrlRow label={`Glow intensity — ${opts.barGlowIntensity}px`}>
+          <SliderRow value={opts.barGlowIntensity} min={0} max={50} onChange={v => onChange({ barGlowIntensity: v })} />
         </CtrlRow>
       )}
 
@@ -638,6 +761,23 @@ export function GaugePanel({
         </CtrlRow>
       )}
 
+      {/* The classic dial sets the same range in its own row, with a tick step. */}
+      {isSensorGaugeMode(mode) && !isThermo && !(mode === 'needle' && opts.needleStyle === 'classic') && (
+        <CtrlRow label="Value range">
+          <div className="grid grid-cols-2 gap-2">
+            <input type="number" value={opts.dialMin} onChange={e => onChange({ dialMin: parseIntegerInput(e.target.value) })}
+              className={numberInputClass} title="Minimum"
+            />
+            <input type="number" value={opts.dialMax} onChange={e => onChange({ dialMax: parseIntegerInput(e.target.value) })}
+              className={numberInputClass} title="Maximum"
+            />
+          </div>
+          <span className={hintClass}>
+            Min / max of the sensor, e.g. 0–150 for FPS. Written into AIDA64 and InfoPanel exports, and used by value labels with a unit other than %.
+          </span>
+        </CtrlRow>
+      )}
+
       <CtrlRow label="Gauge background">
         <div className="flex gap-1.5 flex-wrap items-center">
           {([['transparent', 'Trans.'], ['#000000', 'Black'], ['#1a1a1a', 'Dark'], ['#ffffff', 'White']] as [string, string][]).map(([c, l]) => (
@@ -690,6 +830,33 @@ export function GaugePanel({
         <CtrlRow label={`Label offset — ${opts.labelPad}px`}>
           <SliderRow value={opts.labelPad} min={0} max={60} onChange={v => onChange({ labelPad: v })} />
         </CtrlRow>
+      )}
+
+      {isSensorGaugeMode(mode) && !isThermo && opts.showLabel && (
+        <>
+          <TextStyleRows what="Label" font={opts.labelFont} size={opts.labelFontSize} color={opts.labelColor} autoColor="Theme"
+            onChange={p => onChange({
+              ...(p.font !== undefined ? { labelFont: p.font } : {}),
+              ...(p.size !== undefined ? { labelFontSize: p.size } : {}),
+              ...(p.color !== undefined ? { labelColor: p.color } : {}),
+            })}
+          />
+          <CtrlRow label="Label unit">
+            <div className="flex gap-1.5 flex-wrap">
+              {LABEL_UNITS.map(([u, l]) => (
+                <Pill key={u} active={opts.labelUnit === u} onClick={() => onChange({ labelUnit: u })}>{l}</Pill>
+              ))}
+            </div>
+            {opts.labelUnit === 'custom' && (
+              <input value={opts.labelUnitText} onChange={e => onChange({ labelUnitText: e.target.value })}
+                placeholder="e.g. FPS, MHz, W" className={textInputClass}
+              />
+            )}
+            {opts.labelUnit !== 'percent' && (
+              <span className={hintClass}>Shows the value within the gauge's value range rather than a percentage.</span>
+            )}
+          </CtrlRow>
+        </>
       )}
     </div>
   );

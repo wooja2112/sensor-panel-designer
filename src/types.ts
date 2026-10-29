@@ -48,6 +48,18 @@ export interface PanelConfig {
   background: BackgroundOptions;
 }
 
+// The largest panel or gauge edge, in px. Anything bigger can exhaust memory
+// when rendered and exceeds browsers' canvas size limits.
+export const MAX_CANVAS_SIZE = 8192;
+
+export function clampCanvasSize(v: number): number {
+  return Number.isFinite(v) ? Math.min(MAX_CANVAS_SIZE, Math.max(1, v)) : 1;
+}
+
+// The UI offers up to 50 segments; renderers loop once per segment, so a
+// corrupt file's nSegs must not reach them unbounded.
+export const MAX_SEGMENTS = 100;
+
 let nextId = 1;
 export function makeGaugeId(): string {
   return `gauge-${nextId++}-${Date.now().toString(36)}`;
@@ -88,7 +100,7 @@ export function cloneGaugeInstance(src: GaugeInstance): GaugeInstance {
 // lib/infopanel.ts) — same version bucket (SENSOR_PANEL_FILE_VERSION) just
 // gained a new optional-in-practice field rather than a real breaking change.
 export function normalizeGauge(gauge: Partial<Omit<GaugeInstance, 'opts'>> & {
-  opts?: Partial<DrawOptions>;
+  opts?: Partial<DrawOptions> & { labelShowPercent?: boolean };
   importedText?: ImportedText | null;
 }): GaugeInstance {
   const legacyText = gauge.importedText ?? null;
@@ -96,12 +108,16 @@ export function normalizeGauge(gauge: Partial<Omit<GaugeInstance, 'opts'>> & {
   if (legacyText && (mode === 'container' || mode === 'bar')) mode = 'text';
   if (gauge.importedImage && mode === 'container') mode = 'image';
   const defaults = defaultDrawOptions(mode);
-  const incoming: Partial<DrawOptions> = gauge.opts ?? {};
+  const { labelShowPercent, ...incoming }: Partial<DrawOptions> & { labelShowPercent?: boolean } = gauge.opts ?? {};
   const size = defaultSizeForMode(mode);
+  const nSegs = Number(incoming.nSegs ?? defaults.nSegs);
   const opts: DrawOptions = {
     ...defaults,
     ...incoming,
     mode,
+    nSegs: Number.isFinite(nSegs) ? Math.min(MAX_SEGMENTS, Math.max(0, Math.round(nSegs))) : defaults.nSegs,
+    // labelShowPercent: false predates labelUnit and meant a bare number.
+    labelUnit: incoming.labelUnit ?? (labelShowPercent === false ? 'none' : defaults.labelUnit),
     containerCorners: Array.isArray(incoming.containerCorners)
       ? [...incoming.containerCorners]
       : [...defaults.containerCorners],
@@ -119,8 +135,8 @@ export function normalizeGauge(gauge: Partial<Omit<GaugeInstance, 'opts'>> & {
     name: gauge.name ?? 'Gauge',
     x: gauge.x ?? 0,
     y: gauge.y ?? 0,
-    width: Math.max(1, gauge.width ?? size.width),
-    height: Math.max(1, gauge.height ?? size.height),
+    width: clampCanvasSize(gauge.width ?? size.width),
+    height: clampCanvasSize(gauge.height ?? size.height),
     previewValue: gauge.previewValue ?? 68,
     themeKey: gauge.themeKey ?? 'classic',
     opts,
@@ -138,8 +154,8 @@ export function normalizePanel(panel: Partial<PanelConfig> & { background?: Part
     image: sanitizeImageSrc(panel.background?.image ?? null),
   };
   return {
-    width: Math.max(1, panel.width ?? defaults.width),
-    height: Math.max(1, panel.height ?? defaults.height),
+    width: clampCanvasSize(panel.width ?? defaults.width),
+    height: clampCanvasSize(panel.height ?? defaults.height),
     background,
   };
 }

@@ -1,7 +1,7 @@
 // Ported from Sensor Gauge Image Creator's src/app/App.tsx. Pure canvas
 // drawing logic — no React dependency — so the same drawOn() call renders
 // both the live preview and every exported frame.
-import { drawImportedText } from './importedText';
+import { drawImportedText, importedTextFromOpts } from './importedText';
 
 export type ThemeColors = {
   zone: [string, string, string];
@@ -83,6 +83,53 @@ function slantPath(ctx: CanvasRenderingContext2D, x: number, y: number, w: numbe
   ctx.closePath();
 }
 
+// An arrow pointing right with a matching notch on the left, so a run of
+// them nests into a ">>>" chevron strip.
+function chevronPath(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, point: number) {
+  ctx.beginPath();
+  ctx.moveTo(x, y);
+  ctx.lineTo(x + w - point, y);
+  ctx.lineTo(x + w, y + h / 2);
+  ctx.lineTo(x + w - point, y + h);
+  ctx.lineTo(x, y + h);
+  ctx.lineTo(x + point, y + h / 2);
+  ctx.closePath();
+}
+
+// A hexagon pointed at both ends: honeycomb cells laid along the bar.
+function hexPath(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, point: number) {
+  ctx.beginPath();
+  ctx.moveTo(x + point, y);
+  ctx.lineTo(x + w - point, y);
+  ctx.lineTo(x + w, y + h / 2);
+  ctx.lineTo(x + w - point, y + h);
+  ctx.lineTo(x + point, y + h);
+  ctx.lineTo(x, y + h / 2);
+  ctx.closePath();
+}
+
+type BarShape =
+  | { kind: "roundRect" }
+  | { kind: "slant"; skew: number }
+  | { kind: "chevron"; point: number }
+  | { kind: "hex"; point: number };
+
+function traceShape(ctx: CanvasRenderingContext2D, shape: BarShape, x: number, y: number, w: number, h: number, r: number) {
+  if (shape.kind === "slant") slantPath(ctx, x, y, w, h, shape.skew);
+  else if (shape.kind === "chevron") chevronPath(ctx, x, y, w, h, shape.point);
+  else if (shape.kind === "hex") hexPath(ctx, x, y, w, h, shape.point);
+  else roundRect(ctx, x, y, w, h, r);
+}
+
+// The outline a bar style gives each segment (or the whole solid bar);
+// `skew` is for slanted, `point` for chevron and hex.
+function barShape(style: BarStyle, skew: number, point: number): BarShape {
+  if (style === "slanted") return { kind: "slant", skew };
+  if (style === "chevron") return { kind: "chevron", point };
+  if (style === "hex") return { kind: "hex", point };
+  return { kind: "roundRect" };
+}
+
 // Overlays a glossy directional-light gradient, highlight band, and edge
 // border onto an already-filled region, giving a bar segment a raised, 3D
 // "capsule" look. lightDeg is measured clockwise from "light shining from
@@ -134,9 +181,9 @@ function apply3DBarShading(
 
 // Renders a thermometer-style "bar" gauge: a glass tube capped with a bulb
 // reservoir at the bottom, a mercury column that rises with the value, and
-// dual °F/°C tick scales flanking the tube. °F and °C are linearly related,
-// so both scales can always be shown at once from the same onCount without
-// needing two separate bound values.
+// °F (left) and/or °C (right) tick scales flanking the tube. °F and °C are
+// linearly related, so both scales can be shown at once from the same
+// onCount without needing two separate bound values.
 function drawThermometerGauge(
   ctx: CanvasRenderingContext2D, W: number, H: number, onCount: number, opts: DrawOptions
 ) {
@@ -161,12 +208,13 @@ function drawThermometerGauge(
   // Mercury column — clipped fill growing from the bottom, the same
   // clip-and-reveal technique the solid flat/ascending bar styles use.
   const fillFrac = Math.max(0, Math.min(1, onCount / 100));
+  const mercury = opts.mercuryTheme ? getZoneColor(fillFrac, opts.themeColors) : opts.mercuryColor;
   if (fillFrac > 0) {
     ctx.save();
     tubePath();
     ctx.clip();
     const fillTopY = tubeBottom - fillFrac * (tubeBottom - tubeTop);
-    ctx.fillStyle = opts.mercuryColor;
+    ctx.fillStyle = mercury;
     ctx.fillRect(cx - tubeHalfW, fillTopY, tubeW, tubeBottom - fillTopY);
     ctx.restore();
   }
@@ -180,7 +228,7 @@ function drawThermometerGauge(
   // glass-covered look.
   ctx.beginPath();
   ctx.arc(cx, bulbCY, bulbR, 0, Math.PI * 2);
-  ctx.fillStyle = opts.mercuryColor;
+  ctx.fillStyle = mercury;
   ctx.fill();
   ctx.strokeStyle = "rgba(255,255,255,0.4)";
   ctx.lineWidth = Math.max(1, tubeW * 0.05);
@@ -197,15 +245,19 @@ function drawThermometerGauge(
   ctx.fillStyle = hl;
   ctx.fill();
 
-  // Dual °F / °C tick scales flanking the tube. The lowest tick stops just
+  // °F / °C tick scales flanking the tube. The lowest tick stops just
   // above the bulb (rather than at tubeBottom, which runs into the bulb
   // itself) so it doesn't collide with the °F/°C unit labels beside the
   // bulb below it — real thermometers leave the same gap.
-  const tickCount = Math.max(2, opts.thermoTickCount || 2);
+  const tickCount = Math.floor(Math.max(2, opts.thermoTickCount || 2));
   const tickLen = Math.max(4, tubeW * 0.5);
-  const fs = Math.max(9, Math.min(tubeW * 0.85, H * 0.045));
+  const scaleFont = styledFont(opts.thermoScaleFont, opts.thermoScaleFontSize, Math.max(9, Math.min(tubeW * 0.85, H * 0.045)), 500);
+  const fs = scaleFont.size;
+  const scaleColor = opts.thermoScaleColor.trim() ? opts.thermoScaleColor : "rgba(255,255,255,0.85)";
   const scaleBottom = bulbCY - bulbR - fs * 0.6;
-  ctx.font = `500 ${fs}px sans-serif`;
+  const showF = opts.thermoScales !== "c";
+  const showC = opts.thermoScales !== "f";
+  ctx.font = scaleFont.font;
   ctx.textBaseline = "middle";
   for (let i = 0; i < tickCount; i++) {
     const t = i / (tickCount - 1);
@@ -215,31 +267,42 @@ function drawThermometerGauge(
 
     ctx.strokeStyle = "rgba(255,255,255,0.55)";
     ctx.lineWidth = Math.max(1, tubeW * 0.06);
+    ctx.fillStyle = scaleColor;
 
-    ctx.beginPath();
-    ctx.moveTo(cx - tubeHalfW - 2, y);
-    ctx.lineTo(cx - tubeHalfW - 2 - tickLen, y);
-    ctx.stroke();
-    ctx.fillStyle = "rgba(255,255,255,0.85)";
-    ctx.textAlign = "right";
-    ctx.fillText(String(Math.round(tempF)), cx - tubeHalfW - 2 - tickLen - 4, y);
+    if (showF) {
+      ctx.beginPath();
+      ctx.moveTo(cx - tubeHalfW - 2, y);
+      ctx.lineTo(cx - tubeHalfW - 2 - tickLen, y);
+      ctx.stroke();
+      ctx.textAlign = "right";
+      ctx.fillText(String(Math.round(tempF)), cx - tubeHalfW - 2 - tickLen - 4, y);
+    }
 
-    ctx.beginPath();
-    ctx.moveTo(cx + tubeHalfW + 2, y);
-    ctx.lineTo(cx + tubeHalfW + 2 + tickLen, y);
-    ctx.stroke();
-    ctx.textAlign = "left";
-    ctx.fillText(String(Math.round(tempC)), cx + tubeHalfW + 2 + tickLen + 4, y);
+    if (showC) {
+      ctx.beginPath();
+      ctx.moveTo(cx + tubeHalfW + 2, y);
+      ctx.lineTo(cx + tubeHalfW + 2 + tickLen, y);
+      ctx.stroke();
+      ctx.textAlign = "left";
+      ctx.fillText(String(Math.round(tempC)), cx + tubeHalfW + 2 + tickLen + 4, y);
+    }
   }
 
   // Unit labels flanking the bulb, at the bulb's own vertical center so
-  // they stay clear of the lowest tick label above.
-  const unitFs = Math.max(9, fs * 1.1);
-  ctx.font = `600 ${unitFs}px sans-serif`;
-  ctx.fillStyle = "rgba(255,255,255,0.85)";
-  ctx.textAlign = "center";
-  ctx.fillText("°F", cx - bulbR - Math.max(6, tickLen * 0.5), bulbCY);
-  ctx.fillText("°C", cx + bulbR + Math.max(6, tickLen * 0.5), bulbCY);
+  // they stay clear of the lowest tick label above. Anchored at the bulb's
+  // edge rather than centered near it, so a wide unit label can't run into
+  // the bulb.
+  ctx.font = styledFont(opts.thermoScaleFont, Math.max(9, fs * 1.1), 0, 600).font;
+  ctx.fillStyle = scaleColor;
+  const unitGap = Math.max(4, tickLen * 0.25);
+  if (showF) {
+    ctx.textAlign = "right";
+    ctx.fillText("°F", cx - bulbR - unitGap, bulbCY);
+  }
+  if (showC) {
+    ctx.textAlign = "left";
+    ctx.fillText("°C", cx + bulbR + unitGap, bulbCY);
+  }
 }
 
 // Overlays the same glossy 3D treatment as apply3DBarShading onto a circular
@@ -301,9 +364,17 @@ export function makeStamp() {
   return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
 }
 
-export type BarStyle = "flat" | "ascending" | "slanted" | "thermometer";
+export type BarStyle = "flat" | "ascending" | "slanted" | "chevron" | "hex" | "thermometer";
 export type ThermoUnit = "F" | "C";
 export type NeedleStyle = "plain" | "classic";
+// How a segmented circular gauge draws its segments.
+export type RingStyle = "arc" | "dots" | "sunburst";
+// What a gauge's value label shows after the number. "percent" shows the
+// value as a percentage of the gauge's range; the others show the value
+// itself, mapped into dialMin..dialMax.
+export type LabelUnit = "none" | "percent" | "celsius" | "fahrenheit" | "custom";
+// Which tick scales a thermometer shows beside its tube.
+export type ThermoScales = "both" | "f" | "c";
 
 export interface DrawOptions {
   mode: GaugeMode;
@@ -316,6 +387,14 @@ export interface DrawOptions {
   thermoMinF: number;
   thermoMaxF: number;
   thermoTickCount: number;
+  thermoScales: ThermoScales;
+  // Mercury takes the theme's zone color for its level, and the scale
+  // numbers/units can have their own font ("" = default sans), size (0 =
+  // sized from the tube) and color ("" = soft white).
+  mercuryTheme: boolean;
+  thermoScaleFont: string;
+  thermoScaleFontSize: number;
+  thermoScaleColor: string;
   gauge3D: boolean;
   lightAngle: number;
   colorMode: ColorMode;
@@ -326,6 +405,14 @@ export interface DrawOptions {
   showLabel: boolean;
   labelPos: LabelPos;
   labelPad: number;
+  // Value label font family ("" = default sans), size (0 = sized from the
+  // gauge's geometry), color ("" = follows the theme) and unit, with the
+  // unit's text when it's "custom".
+  labelFont: string;
+  labelFontSize: number;
+  labelColor: string;
+  labelUnit: LabelUnit;
+  labelUnitText: string;
   arcSpan: number;
   rotation: number;
   outerRing: boolean;
@@ -336,6 +423,9 @@ export interface DrawOptions {
   innerRingGlowIntensity: number;
   outerRingGlow: boolean;
   outerRingGlowIntensity: number;
+  ringStyle: RingStyle;
+  barGlow: boolean;
+  barGlowIntensity: number;
   needleCenterDia: number;
   needleCenterColor: string;
   needleCenterBorderColor: string;
@@ -380,6 +470,11 @@ export function defaultDrawOptions(mode: GaugeMode = "bar"): DrawOptions {
     thermoMinF: 32,
     thermoMaxF: 212,
     thermoTickCount: 5,
+    thermoScales: "both",
+    mercuryTheme: false,
+    thermoScaleFont: "",
+    thermoScaleFontSize: 0,
+    thermoScaleColor: "",
     gauge3D: false,
     lightAngle: 0,
     colorMode: "zone",
@@ -390,6 +485,11 @@ export function defaultDrawOptions(mode: GaugeMode = "bar"): DrawOptions {
     showLabel: true,
     labelPos: "top",
     labelPad: 6,
+    labelFont: "",
+    labelFontSize: 0,
+    labelColor: "",
+    labelUnit: "percent",
+    labelUnitText: "",
     arcSpan: 220,
     rotation: 0,
     outerRing: false,
@@ -400,6 +500,9 @@ export function defaultDrawOptions(mode: GaugeMode = "bar"): DrawOptions {
     innerRingGlowIntensity: 14,
     outerRingGlow: false,
     outerRingGlowIntensity: 14,
+    ringStyle: "arc",
+    barGlow: false,
+    barGlowIntensity: 14,
     needleCenterDia: 40,
     needleCenterColor: "#3a3a3a",
     needleCenterBorderColor: "#e5e5e5",
@@ -453,7 +556,7 @@ export function barCanvasIsSwapped(opts: DrawOptions): boolean {
 }
 
 // Min/max written into AIDA64 / InfoPanel so live sensors line up with
-// classic-dial tick labels and thermometer °C ticks. Other gauges stay 0–100.
+// classic-dial tick labels, value labels and thermometer °C ticks.
 // Thermometers always export °C (HWInfo/AIDA temp sensors are typically C);
 // the default 32–212°F scale is 0–100°C, matching the old hard-coded export.
 export function gaugeSensorRange(opts: DrawOptions): { min: number; max: number } {
@@ -462,12 +565,55 @@ export function gaugeSensorRange(opts: DrawOptions): { min: number; max: number 
     const max = Math.round((opts.thermoMaxF - 32) * 5 / 9);
     return min === max ? { min, max: min + 1 } : { min, max };
   }
-  if (opts.mode === "needle" && opts.needleStyle === "classic") {
-    const min = opts.dialMin;
-    const max = opts.dialMax;
-    return min === max ? { min, max: min + 1 } : { min, max };
-  }
-  return { min: 0, max: 100 };
+  // Every other sensor gauge shares the dial's min/max as its value range
+  // (0–100 unless changed), so value labels and live sensors agree.
+  const min = opts.dialMin;
+  const max = opts.dialMax;
+  return min === max ? { min, max: min + 1 } : { min, max };
+}
+
+// Start/end angles in degrees (canvas convention: 0° = 3 o'clock, clockwise)
+// for an arc centered on the top with its gap at the bottom, sweeping exactly
+// arcSpan degrees.
+export function arcAngles(arcSpan: number): { sd: number; ed: number } {
+  const half = (180 - arcSpan) / 2;
+  return { sd: 180 + half, ed: 360 - half };
+}
+
+// A family name as a CSS font-family token, quoted when it isn't a bare
+// identifier, with the default sans as fallback.
+export function cssFontFamily(family: string): string {
+  const f = family.trim();
+  if (!f) return "sans-serif";
+  const quoted = /[^a-zA-Z0-9-]/.test(f) ? `"${f.replace(/"/g, "")}"` : f;
+  return `${quoted}, sans-serif`;
+}
+
+// A user-styled font: the chosen family or the default sans, at the chosen
+// size or the size the gauge derives from its geometry.
+function styledFont(family: string, size: number, autoSize: number, weight: number): { font: string; size: number } {
+  const px = size > 0 ? size : autoSize;
+  return { font: `${weight} ${px}px ${cssFontFamily(family)}`, size: px };
+}
+
+export function valueLabelFont(opts: DrawOptions, autoSize: number): { font: string; size: number } {
+  return styledFont(opts.labelFont, opts.labelFontSize, autoSize, 500);
+}
+
+export function valueLabelText(pct: number, opts: DrawOptions): string {
+  if (opts.labelUnit === "percent") return `${pct}%`;
+  const { min, max } = gaugeSensorRange(opts);
+  const n = String(Math.round(min + pct / 100 * (max - min)));
+  const custom = opts.labelUnitText.trim();
+  if (opts.labelUnit === "celsius") return `${n}°C`;
+  if (opts.labelUnit === "fahrenheit") return `${n}°F`;
+  if (opts.labelUnit === "custom" && custom) return `${n} ${custom}`;
+  return n;
+}
+
+// A chosen label color wins over the theme-derived one.
+export function valueLabelColor(opts: DrawOptions, themed: () => string): string {
+  return opts.labelColor.trim() ? opts.labelColor : themed();
 }
 
 // Draw text visually centered at (x, y) — uses actual glyph bounds, not EM-box
@@ -707,10 +853,11 @@ export function computeGaugeLayout(W: number, H: number, opts: DrawOptions, ctx?
   const showLabel = opts.showLabel && !(opts.mode === "needle" && opts.needleStyle === "classic");
 
   // Estimate font size using base radius so we can compute label space
-  const fs_est = Math.max(10, Math.min(r_base * 0.38, H * 0.13));
+  const font = valueLabelFont(opts, Math.max(10, Math.min(r_base * 0.38, H * 0.13)));
+  const fs_est = font.size;
   const measureCtx = ctx ?? sharedMeasureCtx();
-  measureCtx.font = `500 ${fs_est}px sans-serif`;
-  const lblTextW = showLabel ? measureCtx.measureText("100%").width : 0;
+  measureCtx.font = font.font;
+  const lblTextW = showLabel ? measureCtx.measureText(valueLabelText(100, opts)).width : 0;
 
   // Amount of canvas space the label needs in each axis
   const lblH = fs_est + pad * 2;
@@ -797,15 +944,7 @@ export function drawOn(canvas: HTMLCanvasElement, onCount: number, opts: DrawOpt
     return;
   }
   if (mode === "text") {
-    drawImportedText(ctx, {
-      text: opts.textContent,
-      font: opts.textFont,
-      fontSize: opts.textFontSize,
-      bold: opts.textBold,
-      italic: opts.textItalic,
-      color: opts.textColor,
-      align: opts.textAlign,
-    }, canvas.width, canvas.height);
+    drawImportedText(ctx, importedTextFromOpts(opts), canvas.width, canvas.height, opts.rotation);
     return;
   }
   if (mode === "image") {
@@ -839,11 +978,11 @@ export function drawOn(canvas: HTMLCanvasElement, onCount: number, opts: DrawOpt
 
     const bH = sw, oy = (H - bH) / 2;
     const pct = showLabel ? pctOf(onCount, nSegs) : 0;
-    const fs = Math.max(10, Math.min(bH * 1.1, H * 0.13));
 
     // Measure label first so we can reserve space inside the canvas
-    ctx.font = `500 ${fs}px sans-serif`;
-    const lblW = showLabel ? ctx.measureText(pct + "%").width + pad * 2 : 0;
+    ctx.font = valueLabelFont(opts, Math.max(10, Math.min(bH * 1.1, H * 0.13))).font;
+    const label = valueLabelText(pct, opts);
+    const lblW = showLabel ? ctx.measureText(label).width + pad * 2 : 0;
 
     const margin = W * 0.06;
     let ox = margin;
@@ -860,34 +999,45 @@ export function drawOn(canvas: HTMLCanvasElement, onCount: number, opts: DrawOpt
       // edge (oy + bH) as baseline and its top-right corner (bH tall) as the
       // wedge's tallest point.
       const ascending = opts.barStyle === "ascending";
-      const slanted = opts.barStyle === "slanted";
       const baselineY = oy + bH;
       const minHeightFrac = 0.15;
       const heightAtFrac = (t: number) => bH * (minHeightFrac + t * (1 - minHeightFrac));
-      const solidSkew = bH * 0.35;
-      // Fill clip always uses this *full-width* shape (matching the original
-      // flat behavior) — fillRect below does the actual left-to-right
-      // reveal, so clipping against the full sloped outline naturally
-      // truncates it at the fill edge without needing a separate partial
-      // wedge path.
-      const fullShapePath = () => {
+      const shape = barShape(opts.barStyle, bH * 0.35, Math.min(bH * 0.4, bW * 0.25));
+      // The bar's outline at a given width. Fill clip always uses the
+      // *full-width* shape (matching the original flat behavior) — fillRect
+      // below does the actual left-to-right reveal, so clipping against the
+      // full sloped outline naturally truncates it at the fill edge without
+      // needing a separate partial wedge path.
+      const shapePath = (width: number) => {
         if (ascending) {
           ctx.beginPath();
           ctx.moveTo(ox, baselineY);
-          ctx.lineTo(ox + bW, baselineY);
-          ctx.lineTo(ox + bW, baselineY - heightAtFrac(1));
+          ctx.lineTo(ox + width, baselineY);
+          ctx.lineTo(ox + width, baselineY - heightAtFrac(width / bW));
           ctx.lineTo(ox, baselineY - heightAtFrac(0));
           ctx.closePath();
           return;
         }
-        if (slanted) { slantPath(ctx, ox, oy, bW, bH, solidSkew); return; }
-        roundRect(ctx, ox, oy, bW, bH, barR);
+        traceShape(ctx, shape, ox, oy, width, bH, Math.min(barR, width / 2));
       };
+      const fullShapePath = () => shapePath(bW);
 
       // Solid bar: track + clipped fill
       fullShapePath();
       ctx.fillStyle = track; ctx.fill();
       const fillW = (onCount / 100) * bW;
+      if (fillW > 0 && opts.barGlow) {
+        // The clipped fill below would clip its own shadow, so the glow
+        // comes from an unclipped pass over the filled part.
+        const glow = themeColorTriple(opts)?.[1] ?? opts.solidColor;
+        ctx.save();
+        shapePath(fillW);
+        ctx.fillStyle = glow;
+        ctx.shadowColor = glow;
+        ctx.shadowBlur = opts.barGlowIntensity;
+        ctx.fill();
+        ctx.restore();
+      }
       if (fillW > 0) {
         ctx.save();
         fullShapePath(); ctx.clip();
@@ -912,7 +1062,7 @@ export function drawOn(canvas: HTMLCanvasElement, onCount: number, opts: DrawOpt
       // triangular silhouette (e.g. the empty corner above its short end).
       if (opts.gauge3D && !ascending) {
         apply3DBarShading(ctx, ox, oy, bW, bH, barR, opts.lightAngle,
-          slanted ? () => slantPath(ctx, ox, oy, bW, bH, solidSkew) : undefined);
+          () => traceShape(ctx, shape, ox, oy, bW, bH, barR));
       }
     } else {
       const tg = Math.min(gap * (nSegs - 1), bW * 0.9), segW = (bW - tg) / nSegs;
@@ -922,9 +1072,10 @@ export function drawOn(canvas: HTMLCanvasElement, onCount: number, opts: DrawOpt
       // as a common baseline, with bH — normally the flat bar's fixed
       // thickness — acting as the tallest (rightmost) bar's height instead.
       const ascending = opts.barStyle === "ascending";
-      const slanted = opts.barStyle === "slanted";
       const baselineY = oy + bH;
       const minHeightFrac = 0.15;
+      // Shared by every segment so chevrons nest evenly.
+      const point = Math.min(bH * 0.4, segW * 0.45);
       for (let i = 0; i < nSegs; i++) {
         const segX = ox + i * (segW + gap);
         const segH = ascending
@@ -932,25 +1083,30 @@ export function drawOn(canvas: HTMLCanvasElement, onCount: number, opts: DrawOpt
           : bH;
         const segY = ascending ? baselineY - segH : oy;
         const r = ascending ? Math.min(segR, segH / 3) : segR;
-        const skew = segH * 0.35;
-        ctx.fillStyle = i < onCount ? getSegFill(i, nSegs, opts) : track;
-        if (slanted) slantPath(ctx, segX, segY, segW, segH, skew);
-        else roundRect(ctx, segX, segY, segW, segH, r);
+        const shape = barShape(opts.barStyle, segH * 0.35, point);
+        if (i < onCount) {
+          const color = getSegFill(i, nSegs, opts);
+          if (opts.barGlow) { ctx.shadowColor = color; ctx.shadowBlur = opts.barGlowIntensity; }
+          ctx.fillStyle = color;
+        } else {
+          ctx.fillStyle = track;
+        }
+        traceShape(ctx, shape, segX, segY, segW, segH, r);
         ctx.fill();
+        ctx.shadowBlur = 0;
         if (opts.gauge3D) {
           apply3DBarShading(ctx, segX, segY, segW, segH, r, opts.lightAngle,
-            slanted ? () => slantPath(ctx, segX, segY, segW, segH, skew) : undefined);
+            () => traceShape(ctx, shape, segX, segY, segW, segH, r));
         }
       }
     }
 
     if (showLabel) {
-      ctx.fillStyle = isSolid
+      ctx.fillStyle = valueLabelColor(opts, () => isSolid
         ? getLabelColor(onCount, 100, opts)
-        : getLabelColor(onCount, nSegs, opts);
+        : getLabelColor(onCount, nSegs, opts));
       const barCX = ox + bW / 2;
       const barCY = oy + bH / 2;
-      const label = pct + "%";
       if (labelPos === "top") {
         ctx.textAlign = "center"; ctx.textBaseline = "bottom";
         ctx.fillText(label, barCX, oy - pad);
@@ -971,9 +1127,7 @@ export function drawOn(canvas: HTMLCanvasElement, onCount: number, opts: DrawOpt
     // ── circular gauge ──
     const { r, cx, cy, outerHalf } = computeGaugeLayout(W, H, opts, ctx);
 
-    // Centered on the top with the gap at the bottom, sweeping exactly
-    // arcSpan degrees.
-    const half = (180 - arcSpan) / 2, sd = 180 + half, ed = 360 - half;
+    const { sd, ed } = arcAngles(arcSpan);
     const span = ed - sd;
     const rotRad = opts.rotation * Math.PI / 180;
     const sdRad = sd * Math.PI / 180 + rotRad;
@@ -1140,6 +1294,8 @@ export function drawOn(canvas: HTMLCanvasElement, onCount: number, opts: DrawOpt
         }
         ctx.shadowBlur = 0;
       }
+    } else if (opts.ringStyle !== "arc") {
+      drawRingMarks(ctx, cx, cy, r, sw, sd, span, rotRad, onCount, opts);
     } else {
       ctx.lineCap = "round";
       // Clamp the total angle spent on gaps so segment width (ss) never goes
@@ -1162,7 +1318,7 @@ export function drawOn(canvas: HTMLCanvasElement, onCount: number, opts: DrawOpt
       ctx.shadowBlur = 0;
     }
 
-    if (!isNeedle && opts.gauge3D) apply3DRingShading(ctx, cx, cy, r, sw, sdRad, edRad, opts.lightAngle);
+    if (!isNeedle && opts.gauge3D && (isSolid || opts.ringStyle === "arc")) apply3DRingShading(ctx, cx, cy, r, sw, sdRad, edRad, opts.lightAngle);
 
     // Static outer zone ring — always shows theme zone colors banded at the
     // 60% / 80% thresholds, regardless of the current value.
@@ -1175,15 +1331,14 @@ export function drawOn(canvas: HTMLCanvasElement, onCount: number, opts: DrawOpt
 
     if (showLabel && !classic) {
       const pct = pctOf(onCount, nSegs);
-      ctx.fillStyle = isNeedle
+      ctx.fillStyle = valueLabelColor(opts, () => isNeedle
         ? getZoneColor(onCount / 100, opts.themeColors)
         : isSolid
         ? getLabelColor(onCount, 100, opts)
-        : getLabelColor(onCount, nSegs, opts);
-      const fs = Math.max(10, Math.min(r * 0.38, H * 0.13));
-      ctx.font = `500 ${fs}px sans-serif`;
+        : getLabelColor(onCount, nSegs, opts));
+      ctx.font = valueLabelFont(opts, Math.max(10, Math.min(r * 0.38, H * 0.13))).font;
       const outerEdge = r + outerHalf + pad;
-      const label = pct + "%";
+      const label = valueLabelText(pct, opts);
       if (labelPos === "middle") {
         ctx.textAlign = "center";
         fillTextVCenter(ctx, label, cx, cy);
@@ -1202,6 +1357,45 @@ export function drawOn(canvas: HTMLCanvasElement, onCount: number, opts: DrawOpt
       }
     }
   }
+}
+
+// Dots and sunburst rings: one mark per segment, centered on equal steps
+// of the arc. Sunburst spokes rise from the inner edge of the stroke band;
+// lit ones grow longer toward the end of the arc, unlit ones stay short.
+function drawRingMarks(
+  ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, sw: number,
+  sd: number, span: number, rotRad: number, onCount: number, opts: DrawOptions,
+) {
+  const { nSegs } = opts;
+  // A span past a full turn (only from a hand-edited file) would stack
+  // marks on top of each other, so they share one turn at most.
+  const stepRad = Math.min(span, 360) * Math.PI / 180 / nSegs;
+  const pitch = r * stepRad;
+  const inner = r - sw / 2;
+  ctx.lineCap = "butt";
+  for (let i = 0; i < nSegs; i++) {
+    const a = sd * Math.PI / 180 + rotRad + (i + 0.5) * stepRad;
+    const cos = Math.cos(a), sin = Math.sin(a);
+    const active = i < onCount;
+    const color = active ? getSegFill(i, nSegs, opts) : opts.trackColor;
+    if (active && opts.innerRingGlow) { ctx.shadowColor = color; ctx.shadowBlur = opts.innerRingGlowIntensity; } else { ctx.shadowBlur = 0; }
+    if (opts.ringStyle === "dots") {
+      const dotR = Math.max(1, Math.min((pitch - opts.gap) / 2, sw / 2));
+      ctx.beginPath();
+      ctx.arc(cx + cos * r, cy + sin * r, dotR, 0, Math.PI * 2);
+      ctx.fillStyle = color;
+      ctx.fill();
+    } else {
+      const len = active ? sw * (0.55 + 0.45 * (i + 1) / nSegs) : sw * 0.4;
+      ctx.beginPath();
+      ctx.moveTo(cx + cos * inner, cy + sin * inner);
+      ctx.lineTo(cx + cos * (inner + len), cy + sin * (inner + len));
+      ctx.strokeStyle = color;
+      ctx.lineWidth = Math.min(sw * 0.6, Math.max(1, Math.min(pitch - opts.gap, pitch * 0.45)));
+      ctx.stroke();
+    }
+  }
+  ctx.shadowBlur = 0;
 }
 
 // Converts a 0-100 slider value into the onCount unit drawOn expects

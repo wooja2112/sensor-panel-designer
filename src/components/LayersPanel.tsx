@@ -1,5 +1,6 @@
 import type { GaugeInstance } from '../types';
 import type { GaugeMode } from '../lib/gaugeRender';
+import type { OpenMenu } from './ContextMenu';
 
 const ADD_OPTIONS: { mode: GaugeMode; label: string }[] = [
   { mode: 'bar', label: '+ Bar' },
@@ -11,7 +12,7 @@ const ADD_OPTIONS: { mode: GaugeMode; label: string }[] = [
 ];
 
 export function LayersPanel({
-  gauges, selectedIds, onSelect, onAdd, onDelete, onReorder,
+  gauges, selectedIds, onSelect, onAdd, onDelete, onReorder, onOpenMenu,
 }: {
   gauges: GaugeInstance[];
   selectedIds: string[];
@@ -19,6 +20,7 @@ export function LayersPanel({
   onAdd: (mode: GaugeMode) => void;
   onDelete: (id: string) => void;
   onReorder: (id: string, dir: -1 | 1) => void;
+  onOpenMenu: (menu: OpenMenu) => void;
 }) {
   return (
     <div className="bg-card border border-border rounded-lg p-3 flex flex-col gap-2">
@@ -40,6 +42,14 @@ export function LayersPanel({
           {gauges.map((g, i) => (
             <div key={g.id}
               onClick={e => onSelect(g.id, e.shiftKey || e.ctrlKey || e.metaKey)}
+              onContextMenu={e => {
+                // Right-clicking an unselected row selects just it first, as
+                // on the canvas.
+                e.preventDefault();
+                const selected = selectedIds.includes(g.id);
+                if (!selected) onSelect(g.id, false);
+                onOpenMenu({ clientX: e.clientX, clientY: e.clientY, target: { kind: 'gauges', count: selected ? selectedIds.length : 1 } });
+              }}
               className={[
                 'flex items-center gap-2 px-2 py-1 rounded text-[11px] cursor-pointer transition-colors',
                 selectedIds.includes(g.id) ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-secondary/40',
